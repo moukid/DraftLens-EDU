@@ -74,10 +74,14 @@ def _legacy_code(category: str, ref: Entity | None, stu: Entity | None) -> str:
     return category.upper()
 
 def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None = None, rubric: Rubric | dict | None = None):
-    if not isinstance(rubric, Rubric):
-        rubric = default_rubric()
+    if rubric is None:
+        rubric = default_rubric().model_copy(update={"approved": True})
+    elif not isinstance(rubric, Rubric):
+        raise TypeError("rubric must be a validated Rubric instance")
+    elif not rubric.approved:
+        raise ValueError("grading requires an approved rubric")
     if t:
-        rubric.tolerances = ToleranceProfile(position=t.position,length=t.length,angle=t.angle,radius=t.radius,vertex=t.position)
+        rubric.tolerances = ToleranceProfile(position=t.position,length=t.length,angle=t.angle,radius=t.radius,dimension=t.dimension,vertex=t.position)
     tolerance = rubric.tolerances
     rules = rubric_rule_map(rubric)
     matched, missing, extra = _match_entities(reference, student, tolerance)
@@ -136,6 +140,8 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         ar, ass = _angle(ref), _angle(stu)
         if ar is not None and ass is not None and _angle_delta(ar,ass) > tolerance.angle:
             add("incorrect_angle",ref,stu,"angle",ar,ass,tolerance.angle,confidence)
+        if ref.kind == "dimension" and ref.measurement is not None and stu.measurement is not None and abs(ref.measurement-stu.measurement) > tolerance.dimension:
+            add("incorrect_length",ref,stu,"dimension_measurement",ref.measurement,stu.measurement,tolerance.dimension,confidence)
         if ref.radius is not None and stu.radius is not None and abs(ref.radius-stu.radius) > tolerance.radius:
             add("incorrect_radius",ref,stu,"radius",ref.radius,stu.radius,tolerance.radius,confidence)
         if ref.kind == "arc" and stu.kind == "arc":
@@ -208,4 +214,5 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         "match_count":len(matched), "matches":[{"reference_entity_id":r.id,"student_entity_id":s.id,"confidence":round(c,3)} for r,s,c in matched],
         "audit_trail":audit,
         "tolerances":tolerance.model_dump(),
+        "rubric_application":{"approved":rubric.approved,"normalization_mode":rubric.normalization_mode,"category_weights":{c.id:c.weight for c in rubric.categories}},
     }

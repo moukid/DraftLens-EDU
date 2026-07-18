@@ -7,6 +7,7 @@ class ToleranceProfile(BaseModel):
     length: float = Field(1.0, ge=0)
     angle: float = Field(3.0, ge=0)
     radius: float = Field(1.0, ge=0)
+    dimension: float = Field(1.0, ge=0)
     vertex: float = Field(1.0, ge=0)
 
 class RubricRule(BaseModel):
@@ -16,27 +17,38 @@ class RubricRule(BaseModel):
     deduction: float = Field(3.0, ge=0)
     repeat_cap: float | None = Field(None, ge=0)
     enabled: bool = True
-    commands: list[str] = []
+    commands: list[str] = Field(default_factory=list)
 
 class RubricCategory(BaseModel):
     id: str
     name: str
     weight: float = Field(ge=0, le=100)
     max_deduction: float | None = Field(None, ge=0)
-    rules: list[RubricRule] = []
+    rules: list[RubricRule] = Field(default_factory=list)
 
 class Rubric(BaseModel):
     title: str = "DraftLens assignment rubric"
     approved: bool = False
     categories: list[RubricCategory]
-    tolerances: ToleranceProfile = ToleranceProfile()
+    tolerances: ToleranceProfile = Field(default_factory=ToleranceProfile)
     normalization_mode: Literal["strict", "translation", "translation_rotation", "instructor_defined"] = "translation"
-    accepted_alternatives: list[str] = []
+    accepted_alternatives: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def weights_total_100(self) -> "Rubric":
         if abs(sum(c.weight for c in self.categories) - 100.0) > 0.001:
             raise ValueError("Rubric category weights must total 100%.")
+        category_ids = [category.id for category in self.categories]
+        if len(category_ids) != len(set(category_ids)):
+            raise ValueError("Rubric category IDs must be unique.")
+        if "completion" not in category_ids:
+            raise ValueError("Rubric must include a completion category.")
+        for category in self.categories:
+            if category.max_deduction is not None and category.max_deduction > category.weight:
+                raise ValueError(f"Category '{category.id}' maximum deduction cannot exceed its weight.")
+        rule_ids = [rule.id for category in self.categories for rule in category.rules]
+        if len(rule_ids) != len(set(rule_ids)):
+            raise ValueError("Rubric rule IDs must be unique.")
         return self
 
 def default_rubric(title: str = "Geometric accuracy rubric") -> Rubric:

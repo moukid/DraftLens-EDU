@@ -1,4 +1,4 @@
-﻿# DraftLens EDU
+# DraftLens EDU
 
 DraftLens EDU is an explainable web grader for AutoCAD DXF assignments, built for the OpenAI Build Week Education track. It measures drawings deterministically, displays the evidence, applies a rubric, and can turn structured findings into pedagogical language. The model is never asked to measure geometry.
 
@@ -54,3 +54,12 @@ Codex was used to scaffold the implementation, create synthetic DXFs, design det
 6. Download the report, disconnect from the server, and open the HTML to prove it is standalone.
 
 
+
+
+## Rubric approval and fallback grading
+
+Rubric suggestions are provisional. The client must approve a rubric with `POST /api/rubric/approve`, including the `reference_id` returned by `POST /api/rubric/suggest`. Approved rubrics are associated with the SHA-256 fingerprint of the exact reference DXF. Grading selects an explicitly supplied approved `rubric_id` or the latest approved rubric associated with that fingerprint.
+
+If no approved rubric exists, `POST /api/grade` returns HTTP 409. The documented 65/25/10 rubric is used only when the multipart field `allow_fallback=true` is explicitly supplied. Legacy inline rubric uploads are rejected because they bypass instructor approval. Position, length, angle, radius, dimension, and vertex tolerances come from the selected rubric; legacy tolerance form fields affect only explicit fallback mode.
+
+Rubrics are stored in process memory for Competition V1. Restarting the FastAPI application clears approved rubrics and reference associations, so the instructor must approve them again. Strict and translation normalization are supported by the foundation grader. Translation-and-rotation and instructor-defined transforms are rejected clearly until their deterministic transformation records are implemented.
