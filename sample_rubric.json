@@ -1,0 +1,6 @@
+﻿{
+  "title": "Technical Drawing Accuracy",
+  "total_points": 100,
+  "deductions": {"missing_wall": 12, "extra_wall": 6, "wall_geometry": 5, "door": 8, "window": 6, "dimension": 5},
+  "caps": {"walls": 45, "doors": 16, "windows": 12, "dimensions": 20}
+}

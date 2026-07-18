@@ -1,0 +1,8 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+ezdxf==1.4.2
+shapely==2.1.1
+openai==1.99.9
+jinja2==3.1.6
+
