@@ -1,1 +1,151 @@
-﻿<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>DraftLens EDU</title><link rel="stylesheet" href="/static/style.css"></head><body><header><a class="brand" href="/">DraftLens <span>EDU</span></a><p>Explainable CAD grading</p></header><main><section class="hero"><p class="eyebrow">OPENAI BUILD WEEK · EDUCATION</p><h1>See exactly where a drawing needs work.</h1><p>Deterministic geometry analysis first. Clear, teachable feedback second.</p></section><form id="grade-form"><section class="card uploads"><label>Reference DXF<input required type="file" name="reference" accept=".dxf"><small>Instructor solution</small></label><label>Student DXF<input required type="file" name="student" accept=".dxf"><small>Submission to assess</small></label><label>Rubric (optional)<input type="file" name="rubric" accept=".json"><small>Defaults to sample rubric</small></label></section><details class="card"><summary>Geometric tolerances</summary><div class="tols"><label>Position<input name="position_tolerance" type="number" step=".1" value="2"></label><label>Length<input name="length_tolerance" type="number" step=".1" value="1"></label><label>Angle °<input name="angle_tolerance" type="number" step=".1" value="3"></label><label>Dimension<input name="dimension_tolerance" type="number" step=".1" value="1"></label></div></details><button id="submit">Analyze drawings <span>→</span></button><p id="error" role="alert"></p></form><section id="results" hidden><div class="score-card"><div><p class="eyebrow">ASSESSMENT</p><h2>Drawing report</h2></div><div class="score"><strong id="score">—</strong><span>/ 100</span></div><button id="download" class="secondary">Download HTML</button></div><div class="view-tabs"><button data-view="reference">Reference</button><button data-view="student" class="active">Student + issues</button></div><div id="canvas" class="drawing"></div><div class="results-grid"><section><h2>Findings</h2><div id="issues"></div></section><aside><h2>Learning feedback</h2><ol id="feedback"></ol><p class="privacy">Geometry is measured locally by the server. The language model, when configured, receives structured findings only.</p></aside></div></section></main><footer>DraftLens EDU · Deterministic grading, human-centered feedback</footer><script src="/static/app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DraftLens EDU — Visual drawing review</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <a class="brand" href="/" aria-label="DraftLens EDU home">DraftLens <span>EDU</span></a>
+      <p>Deterministic CAD grading and visual evidence</p>
+    </div>
+    <p id="workflow-status" class="status-pill" role="status">Waiting for reference</p>
+  </header>
+
+  <main class="workspace">
+    <aside class="setup-column" aria-label="Review setup">
+      <section class="panel" aria-labelledby="reference-heading">
+        <div class="step-heading"><span>1</span><div><h1 id="reference-heading">Reference drawing</h1><p>Validate the instructor solution before grading.</p></div></div>
+        <label class="file-field" for="reference-file">
+          <span>Reference DXF</span>
+          <input id="reference-file" type="file" accept=".dxf">
+          <strong id="reference-name">Choose a .dxf file</strong>
+        </label>
+        <div id="validation-status" class="validation-state neutral" role="status">Not analyzed</div>
+        <p id="validation-message" class="supporting-text">Upload a reference to inspect entities, extents, and validation findings.</p>
+        <div id="analysis-summary" class="analysis-summary" hidden>
+          <dl class="metric-grid">
+            <div><dt>Type</dt><dd id="analysis-type">—</dd></div>
+            <div><dt>Entities</dt><dd id="analysis-entities">—</dd></div>
+            <div><dt>Warnings</dt><dd id="analysis-warnings">—</dd></div>
+            <div><dt>Critical</dt><dd id="analysis-critical">—</dd></div>
+          </dl>
+          <div><h2>Detected features</h2><ul id="analysis-features" class="compact-list"></ul></div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="rubric-heading">
+        <div class="step-heading"><span>2</span><div><h2 id="rubric-heading">Rubric approval</h2><p>Review the suggested settings and approve them for this reference.</p></div></div>
+        <p id="rubric-empty" class="empty-copy">Analyze a reference to generate a provisional rubric.</p>
+        <div id="rubric-editor" hidden>
+          <label class="field">Rubric name<input id="rubric-name" type="text" maxlength="160"></label>
+          <div class="section-label"><span>Category weights</span><strong id="weight-total">0%</strong></div>
+          <div id="rubric-categories" class="rubric-categories"></div>
+          <fieldset>
+            <legend>Geometry tolerances</legend>
+            <div class="tolerance-grid">
+              <label>Position<input data-tolerance="position" type="number" min="0" step="0.1"></label>
+              <label>Length<input data-tolerance="length" type="number" min="0" step="0.1"></label>
+              <label>Angle °<input data-tolerance="angle" type="number" min="0" step="0.1"></label>
+              <label>Radius<input data-tolerance="radius" type="number" min="0" step="0.1"></label>
+              <label>Dimension<input data-tolerance="dimension" type="number" min="0" step="0.1"></label>
+              <label>Vertex<input data-tolerance="vertex" type="number" min="0" step="0.1"></label>
+            </div>
+          </fieldset>
+          <button id="approve-rubric" type="button" class="primary-button">Approve rubric</button>
+          <p id="rubric-status" class="supporting-text" role="status">Instructor approval is required before review.</p>
+        </div>
+        <label class="fallback-control" for="fallback-mode">
+          <input id="fallback-mode" type="checkbox">
+          <span><strong>Use explicit 65/25/10 fallback</strong><small>Off by default. Use only when an approved rubric is unavailable.</small></span>
+        </label>
+        <p class="memory-note">Approved rubrics are stored in memory and are cleared when the application restarts.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="student-heading">
+        <div class="step-heading"><span>3</span><div><h2 id="student-heading">Student submission</h2><p>Run the same deterministic pipeline used by grading.</p></div></div>
+        <label class="file-field" for="student-file">
+          <span>Student DXF</span>
+          <input id="student-file" type="file" accept=".dxf">
+          <strong id="student-name">Choose a .dxf file</strong>
+        </label>
+        <button id="run-review" type="button" class="primary-button" disabled>Generate visual review</button>
+        <p id="api-error" class="error-message" role="alert" hidden></p>
+      </section>
+    </aside>
+
+    <section class="review-column" aria-label="Reviewed drawing result">
+      <div id="review-placeholder" class="review-placeholder">
+        <div aria-hidden="true" class="placeholder-mark">DL</div>
+        <h2>Visual evidence appears here</h2>
+        <p>Complete the reference, rubric, and student steps to generate a reviewed drawing.</p>
+      </div>
+
+      <div id="review-results" hidden>
+        <section class="results-bar" aria-labelledby="results-heading">
+          <div><p class="eyebrow">Reviewed result</p><h2 id="results-heading">Drawing assessment</h2><p id="result-rubric">—</p></div>
+          <dl class="result-metrics">
+            <div class="score-metric"><dt>Score</dt><dd><strong id="result-score">—</strong><span>/100</span></dd></div>
+            <div><dt>Units</dt><dd id="result-units">—</dd></div>
+            <div><dt>Issues</dt><dd id="result-issues">—</dd></div>
+            <div><dt>Unsupported</dt><dd id="result-unsupported">—</dd></div>
+          </dl>
+        </section>
+
+        <section class="drawing-panel" aria-labelledby="drawing-heading">
+          <div class="panel-heading"><div><p class="eyebrow">Expected vs actual</p><h2 id="drawing-heading">Reviewed drawing</h2></div><p id="critical-summary" class="critical-summary"></p></div>
+          <div id="drawing-viewport" class="drawing-viewport" aria-live="polite"></div>
+          <ul class="legend" aria-label="Drawing legend">
+            <li class="legend-reference">Reference</li><li class="legend-student">Student</li>
+            <li class="legend-missing">Missing</li><li class="legend-extra">Extra</li>
+            <li class="legend-inaccurate">Inaccurate</li><li class="legend-connectivity">Connectivity</li>
+            <li class="legend-warning">Warning</li><li class="legend-critical">Critical</li>
+          </ul>
+        </section>
+
+        <div class="review-detail-grid">
+          <section class="issues-panel" aria-labelledby="issues-heading">
+            <div class="panel-heading"><div><p class="eyebrow">Findings</p><h2 id="issues-heading">Issue list</h2></div></div>
+            <div class="filters" role="group" aria-label="Filter issues">
+              <button type="button" data-filter="all" class="active" aria-pressed="true">All</button>
+              <button type="button" data-filter="missing" aria-pressed="false">Missing</button>
+              <button type="button" data-filter="extra" aria-pressed="false">Extra</button>
+              <button type="button" data-filter="inaccurate" aria-pressed="false">Inaccurate</button>
+              <button type="button" data-filter="connectivity" aria-pressed="false">Connectivity</button>
+              <button type="button" data-filter="warning" aria-pressed="false">Warnings</button>
+              <button type="button" data-filter="critical" aria-pressed="false">Critical</button>
+            </div>
+            <div id="issue-list" class="issue-list"></div>
+            <p id="issue-empty" class="empty-copy" hidden>No issues match this filter.</p>
+          </section>
+
+          <aside class="feedback-panel" aria-labelledby="feedback-heading">
+            <p class="eyebrow">Technical evidence</p><h2 id="feedback-heading">Selected issue</h2>
+            <div id="feedback-empty" class="empty-copy">Select an issue in the list or drawing.</div>
+            <div id="feedback-detail" hidden>
+              <div class="feedback-title"><span id="feedback-severity" class="severity-chip">—</span><strong id="feedback-id">—</strong></div>
+              <h3 id="feedback-category">—</h3><p id="feedback-text">—</p>
+              <dl class="evidence-list">
+                <div><dt>Expected entity</dt><dd id="evidence-expected">—</dd></div>
+                <div><dt>Student entity</dt><dd id="evidence-actual">—</dd></div>
+                <div><dt>Measurement</dt><dd id="evidence-measurement">—</dd></div>
+                <div><dt>Rule</dt><dd id="evidence-rule">—</dd></div>
+                <div><dt>Deduction</dt><dd id="evidence-deduction">—</dd></div>
+                <div><dt>Confidence</dt><dd id="evidence-confidence">—</dd></div>
+              </dl>
+              <div id="feedback-commands" hidden><h3>Suggested commands</h3><ul id="command-list" class="command-list"></ul></div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>DraftLens EDU · Approved rubrics · Deterministic geometry · Traceable evidence</footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

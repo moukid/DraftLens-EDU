@@ -1,0 +1,158 @@
+from html.parser import HTMLParser
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+client = TestClient(app)
+
+
+class PageParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.elements = {}
+        self.assets = []
+        self.filters = set()
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        element_id = attributes.get("id")
+        if element_id:
+            self.elements[element_id] = (tag, attributes)
+        if tag in {"script", "link"}:
+            location = attributes.get("src") or attributes.get("href")
+            if location:
+                self.assets.append(location)
+        if "data-filter" in attributes:
+            self.filters.add(attributes["data-filter"])
+
+
+def page():
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = PageParser()
+    parser.feed(response.text)
+    return response, parser
+
+
+def test_visual_review_page_exposes_complete_semantic_workflow():
+    response, parser = page()
+    required = {
+        "workflow-status",
+        "reference-file",
+        "validation-status",
+        "analysis-summary",
+        "rubric-editor",
+        "rubric-categories",
+        "approve-rubric",
+        "fallback-mode",
+        "student-file",
+        "run-review",
+        "review-results",
+        "result-score",
+        "drawing-viewport",
+        "issue-list",
+        "feedback-detail",
+        "api-error",
+    }
+    assert required <= parser.elements.keys()
+    assert parser.elements["reference-file"][0] == "input"
+    assert parser.elements["student-file"][0] == "input"
+    assert parser.elements["drawing-viewport"][0] == "div"
+    assert "Reviewed drawing" in response.text
+    assert "Technical evidence" in response.text
+
+
+def test_ui_assets_are_served_from_fastapi_static_mount():
+    javascript = client.get("/static/app.js")
+    stylesheet = client.get("/static/style.css")
+    assert javascript.status_code == 200
+    assert stylesheet.status_code == 200
+    assert "javascript" in javascript.headers["content-type"]
+    assert "text/css" in stylesheet.headers["content-type"]
+    assert '"use strict"' in javascript.text
+    assert ".drawing-viewport" in stylesheet.text
+
+
+def test_page_has_no_external_or_cdn_dependencies():
+    response, parser = page()
+    assert parser.assets == ["/static/style.css", "data:,", "/static/app.js"]
+    lowered = response.text.lower()
+    assert "http://" not in lowered
+    assert "https://" not in lowered
+    assert "//cdn" not in lowered
+    assert "node_modules" not in lowered
+
+
+def test_client_uses_existing_review_and_rubric_pipeline_contracts():
+    javascript = client.get("/static/app.js").text
+    for endpoint in (
+        "/api/reference/validate",
+        "/api/assignment/analyze",
+        "/api/rubric/suggest",
+        "/api/rubric/approve",
+        "/api/review",
+    ):
+        assert endpoint in javascript
+    assert 'form.append("reference"' in javascript
+    assert 'form.append("student"' in javascript
+    assert 'form.append("rubric_id"' in javascript
+    assert 'form.append("allow_fallback", "true")' in javascript
+    assert "/api/grade" not in javascript
+
+
+def test_client_sanitizes_server_svg_without_unsafe_html_execution():
+    javascript = client.get("/static/app.js").text
+    assert "new DOMParser()" in javascript
+    assert '"image/svg+xml"' in javascript
+    assert 'documentNode.documentElement.localName !== "svg"' in javascript
+    assert 'const blockedElements = new Set' in javascript
+    assert 'blockedElements.has(node.localName.toLowerCase())' in javascript
+    assert 'name.startsWith("on")' in javascript
+    assert 'normalized.includes("javascript:")' in javascript
+    assert "document.importNode" in javascript
+    assert ".replaceChildren(" in javascript
+    assert "innerHTML" not in javascript
+    assert "eval(" not in javascript
+    assert "new Function" not in javascript
+    assert "Function(" not in javascript
+
+
+def test_fallback_is_explicitly_off_and_review_is_disabled_initially():
+    _, parser = page()
+    fallback = parser.elements["fallback-mode"][1]
+    review = parser.elements["run-review"][1]
+    assert fallback.get("type") == "checkbox"
+    assert "checked" not in fallback
+    assert "disabled" in review
+
+
+def test_issue_filters_and_bidirectional_issue_selection_are_wired():
+    _, parser = page()
+    assert parser.filters == {
+        "all",
+        "missing",
+        "extra",
+        "inaccurate",
+        "connectivity",
+        "warning",
+        "critical",
+    }
+    javascript = client.get("/static/app.js").text
+    assert 'button.dataset.issueId = issue.issue_id' in javascript
+    assert 'event.target.closest("[data-issue-id]")' in javascript
+    assert 'querySelectorAll("#drawing-viewport [data-issue-id]")' in javascript
+    assert 'element.getAttribute("data-issue-id") === issueId' in javascript
+
+
+def test_stage_2b_ui_contains_no_forbidden_feature_hooks():
+    html = client.get("/").text.lower()
+    javascript = client.get("/static/app.js").text.lower()
+    assert 'id="zoom' not in html
+    assert 'data-action="zoom"' not in html
+    assert 'id="pan-' not in html
+    assert 'data-action="pan"' not in html
+    assert "annotated dxf" not in html
+    assert "/api/report" not in javascript
+    assert "websocket" not in javascript
