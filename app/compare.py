@@ -99,14 +99,18 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
             "missing_geometry": "Add the required geometry at the ghosted location.",
             "extra_geometry": "Remove the unmatched construction geometry if it is not an accepted alternative.",
             "incorrect_position": f"Move the entity by {abs(deviation or 0):.3f} drawing units toward the expected location.",
-            "incorrect_length": f"Adjust the length from {actual:.3f} to {expected:.3f}.",
-            "incorrect_angle": f"Rotate the entity from {actual:.3f} degrees to {expected:.3f} degrees.",
-            "incorrect_radius": f"Change the radius from {actual:.3f} to {expected:.3f}.",
+            "incorrect_length": "Adjust the entity length to the expected value.",
+            "incorrect_angle": "Rotate the entity to the expected angle.",
+            "incorrect_radius": "Change the entity to the expected radius.",
             "incorrect_shape": "Edit the vertices or curve so it follows the reference ghost.",
             "open_polyline": "Close the required boundary.",
             "duplicate_geometry": "Remove the coincident duplicate entity.",
             "unsupported_entity": "Review this unsupported entity manually.",
         }.get(category, "Review this finding.")
+        if category in {"incorrect_length", "incorrect_angle", "incorrect_radius"} and isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+            labels = {"incorrect_length": ("length", ""), "incorrect_angle": ("angle", " degrees"), "incorrect_radius": ("radius", "")}
+            label, suffix = labels[category]
+            action = f"Adjust the {label} from {actual:.3f}{suffix} to {expected:.3f}{suffix}."
         issue = Issue(
             id=f"E-{len(issues)+1:03d}", category=category, code=_legacy_code(category,ref,stu),
             severity=severity, confidence=confidence, deduction=deduction,
