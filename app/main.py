@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib,html,os,uuid
+import html,os,uuid
 from pathlib import Path
 from fastapi import FastAPI,File,Form,HTTPException,UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -7,10 +7,10 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment,FileSystemLoader,select_autoescape
 from pydantic import BaseModel, Field
 from .analysis import analyze_assignment
-from .compare import compare_drawings
 from .dxf import DXFParseError,parse_dxf_bytes
 from .feedback import generate_feedback
-from .rubric import Rubric, ToleranceProfile, default_rubric
+from .review_service import PipelineContractError, build_review_response, reference_fingerprint, run_grading_pipeline
+from .rubric import Rubric, default_rubric
 from .validator import validate_reference
 ROOT=Path(__file__).parent; templates=Environment(loader=FileSystemLoader(ROOT/"templates"),autoescape=select_autoescape())
 app=FastAPI(title="DraftLens EDU",version="0.2.0"); app.mount("/static",StaticFiles(directory=ROOT/"static"),name="static")
@@ -22,8 +22,6 @@ class RubricApprovalRequest(BaseModel):
     reference_id: str = Field(min_length=64, max_length=64)
     rubric: Rubric
 
-def reference_fingerprint(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 def render(name,**ctx): return templates.get_template(name).render(**ctx)
 async def read_upload(f:UploadFile):
     if not f.filename or not f.filename.lower().endswith(".dxf"): raise HTTPException(400,"Only .dxf files are accepted.")
@@ -37,6 +35,41 @@ def dxf_parse_error_handler(_request, exc: DXFParseError):
 def index(): return render("index.html")
 @app.get("/health")
 def health(): return {"status":"ok"}
+async def run_uploaded_pipeline(
+    reference: UploadFile,
+    student: UploadFile,
+    rubric_id: str | None,
+    allow_fallback: bool,
+    position_tolerance: float,
+    length_tolerance: float,
+    angle_tolerance: float,
+    dimension_tolerance: float,
+    radius_tolerance: float,
+    rubric: UploadFile | None,
+):
+    reference_bytes = await read_upload(reference)
+    student_bytes = await read_upload(student)
+    if rubric and rubric.filename:
+        raise HTTPException(409, "Inline rubric uploads are no longer accepted. Approve and associate the rubric before grading.")
+    try:
+        return run_grading_pipeline(
+            reference_bytes,
+            student_bytes,
+            rubric_id=rubric_id,
+            allow_fallback=allow_fallback,
+            position_tolerance=position_tolerance,
+            length_tolerance=length_tolerance,
+            angle_tolerance=angle_tolerance,
+            dimension_tolerance=dimension_tolerance,
+            radius_tolerance=radius_tolerance,
+            rubrics=RUBRICS,
+            reference_rubrics=REFERENCE_RUBRICS,
+            rubric_references=RUBRIC_REFERENCES,
+        )
+    except PipelineContractError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
 @app.post("/api/grade")
 async def grade(
     reference: UploadFile = File(...),
@@ -50,47 +83,44 @@ async def grade(
     radius_tolerance: float = Form(1),
     rubric: UploadFile | None = File(None),
 ):
-    reference_bytes = await read_upload(reference)
-    student_bytes = await read_upload(student)
-    if rubric and rubric.filename:
-        raise HTTPException(409, "Inline rubric uploads are no longer accepted. Approve and associate the rubric before grading.")
-    reference_id = reference_fingerprint(reference_bytes)
-    selected_id = rubric_id or REFERENCE_RUBRICS.get(reference_id)
-    if selected_id:
-        selected_rubric = RUBRICS.get(selected_id)
-        if selected_rubric is None or not selected_rubric.approved:
-            raise HTTPException(409, "The selected rubric does not exist or is not approved.")
-        if RUBRIC_REFERENCES.get(selected_id) != reference_id:
-            raise HTTPException(409, "The selected rubric is not associated with this reference drawing.")
-        rubric_source = "explicit_approved" if rubric_id else "associated_approved"
-    elif allow_fallback:
-        selected_rubric = default_rubric("Explicit 65/25/10 fallback").model_copy(update={"approved": True})
-        selected_rubric.tolerances = ToleranceProfile(
-            position=position_tolerance, length=length_tolerance, angle=angle_tolerance,
-            radius=radius_tolerance, dimension=dimension_tolerance, vertex=position_tolerance,
-        )
-        rubric_source = "explicit_fallback"
-    else:
-        raise HTTPException(409, "No approved rubric is associated with this reference. Approve a rubric or explicitly enable fallback mode.")
-    if selected_rubric.normalization_mode not in {"strict", "translation"}:
-        raise HTTPException(422, f"Normalization mode '{selected_rubric.normalization_mode}' is not implemented in V1 foundation grading.")
-    normalize = selected_rubric.normalization_mode == "translation"
-    ref = parse_dxf_bytes(reference_bytes, source="reference", normalize=normalize)
-    stu = parse_dxf_bytes(student_bytes, source="student", normalize=normalize)
-    result = compare_drawings(ref, stu, rubric=selected_rubric)
+    output = await run_uploaded_pipeline(
+        reference, student, rubric_id, allow_fallback, position_tolerance,
+        length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric,
+    )
+    result = output.comparison
     feedback = None
     try:
         feedback = generate_feedback(result)
     except Exception:
         feedback = None
     result.update({
-        "reference": ref.to_dict(), "student": stu.to_dict(),
+        "reference": output.reference.to_dict(), "student": output.student.to_dict(),
         "feedback": feedback or local_feedback(result), "ai_used": feedback is not None,
-        "reference_id": reference_id,
-        "rubric_selection": {"rubric_id": selected_id, "source": rubric_source},
-        "rubric": selected_rubric.model_dump(),
+        "reference_id": output.reference_id,
+        "rubric_selection": output.rubric_selection,
+        "rubric": output.rubric.model_dump(),
     })
     return result
+
+
+@app.post("/api/review")
+async def review(
+    reference: UploadFile = File(...),
+    student: UploadFile = File(...),
+    rubric_id: str | None = Form(None),
+    allow_fallback: bool = Form(False),
+    position_tolerance: float = Form(2),
+    length_tolerance: float = Form(1),
+    angle_tolerance: float = Form(3),
+    dimension_tolerance: float = Form(1),
+    radius_tolerance: float = Form(1),
+    rubric: UploadFile | None = File(None),
+):
+    output = await run_uploaded_pipeline(
+        reference, student, rubric_id, allow_fallback, position_tolerance,
+        length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric,
+    )
+    return build_review_response(output)
 @app.post("/api/reference/validate")
 async def reference_validate(reference: UploadFile = File(...)):
     drawing = parse_dxf_bytes(await read_upload(reference), source="reference")

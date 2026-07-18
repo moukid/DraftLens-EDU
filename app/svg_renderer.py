@@ -143,6 +143,8 @@ def _issue_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> list[str
         region = _region_svg(issue, transform)
         if region:
             output.append(f'<g {issue_attr} data-role="{_attribute(issue.visual_role)}">{region}</g>')
+        else:
+            output.append(f'<g {issue_attr} data-role="{_attribute(issue.visual_role)}" class="{_attribute(issue.visual_role)}" data-geometry="unavailable"></g>')
     return output
 
 

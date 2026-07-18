@@ -94,7 +94,7 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
             deduction, severity, rule_id, commands = rule.deduction, rule.severity, rule.id, rule.commands
         else:
             deduction, severity, rule_id, commands = 0.0, "warning", None, []
-        location = _center(ref or stu)
+        location = _center(ref or stu) if ref is not None or stu is not None else None
         deviation = None
         if isinstance(expected, (int,float)) and isinstance(actual, (int,float)):
             deviation = actual-expected
