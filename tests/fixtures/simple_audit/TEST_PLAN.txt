@@ -1,0 +1,62 @@
+DraftLens EDU — Simple Controlled DXF Test Pack
+
+Reference characteristics:
+- Units: centimeters
+- 19 model-space entities
+- 16 LINE
+- 1 CIRCLE
+- 2 closed LWPOLYLINE
+- All entities on Layer 0
+- Every individual LINE is exactly 100 units long
+- No exact duplicate entities in the reference
+- No zero-length entities
+- No unsupported geometry in the reference
+
+Run tests in this order:
+
+00_reference_000-Simple.dxf
+Use as the instructor reference for every test.
+
+01_exact_copy_should_score_100.dxf
+Expected: 100 or the system's documented maximum; zero geometry issues.
+This is the critical false-positive gate. Do not continue if it fails.
+
+02_missing_line_73B.dxf
+One isolated horizontal LINE is deleted.
+Expected: one missing-geometry issue at the upper-left isolated horizontal line.
+
+03_wrong_length_73C_80_units.dxf
+One isolated vertical LINE is shortened from 100 to 80 units.
+Expected: inaccurate length, expected-versus-actual evidence, localized highlight.
+
+04_moved_line_73B_plus20Y.dxf
+One isolated horizontal LINE is moved upward 20 units without changing length.
+Expected: positional inaccuracy, not a length error.
+
+05_wrong_angle_73D_40deg.dxf
+One isolated diagonal LINE changes from 30 degrees to 40 degrees, retaining 100-unit length.
+Expected: angular inaccuracy with expected-versus-actual geometry.
+
+06_moved_circle_722_plus20X.dxf
+The circle moves 20 units right without changing radius.
+Expected: positional inaccuracy for the circle.
+
+07_wrong_circle_radius_40.dxf
+The circle radius changes from 50 to 40 units.
+Expected: radius inaccuracy with measurement evidence.
+
+08_extra_line_handle_740.dxf
+One isolated 100-unit horizontal LINE is added.
+Expected: one extra-geometry issue.
+
+09_duplicate_line_73B_handle_741.dxf
+The isolated upper-left horizontal LINE is duplicated exactly.
+Expected: duplicate/extra-entity issue without crashing.
+
+10_disconnected_square_corner_5_units.dxf
+The lower endpoint of the square's right vertical side is shortened by 5 units.
+Expected: connectivity issue plus a 5-unit length discrepancy. This is intentionally a combined case.
+
+Audit rule:
+Record expected result, actual score, issue count, issue category, highlighted location,
+feedback usefulness, deduction, browser console error, and pass/fail for every file.
