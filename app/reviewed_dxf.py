@@ -52,7 +52,12 @@ class ReviewedIssue:
     technical_feedback: str
     rubric_rule_id: str | None
     deduction: float
+    raw_deduction: float
+    applied_deduction: float
+    deduction_status: str
+    suppression_reason: str | None
     confidence: str
+    classification: str
     provenance: str
     measurement_json: str
 
@@ -172,6 +177,30 @@ def _role(category: str, severity: str) -> str:
     return "warning"
 
 
+def _deduction_number(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
+def _deduction_contract(raw_issue: dict[str, Any]) -> tuple[float, float, str, str | None]:
+    raw = _deduction_number(raw_issue.get("deduction"))
+    applied_value = raw_issue.get("applied_deduction")
+    applied = raw if applied_value is None else _deduction_number(applied_value)
+    suppression_reason = raw_issue.get("suppression_reason")
+    if suppression_reason:
+        status = "suppressed"
+    elif applied < raw:
+        status = "capped"
+    elif applied > 0:
+        status = "applied"
+    else:
+        status = "none"
+    return raw, applied, status, str(suppression_reason) if suppression_reason else None
+
+
 def _location_region(location: Any) -> tuple[float, float, float, float] | None:
     if isinstance(location, (list, tuple)) and len(location) >= 2 and _finite(location[0]) and _finite(location[1]):
         x, y = float(location[0]), float(location[1])
@@ -213,6 +242,7 @@ def build_reviewed_drawing(
         actual = student_by_id.get(str(source_id)) if source_id is not None else None
         expected = reference_by_id.get(str(expected_id)) if expected_id is not None else None
         region = _union_regions(expected.bbox if expected else None, actual.bbox if actual else None, _location_region(raw_issue.get("location")))
+        raw_deduction, applied_deduction, deduction_status, suppression_reason = _deduction_contract(raw_issue)
         reviewed_issues.append(ReviewedIssue(
             issue_id=issue_id,
             category=category,
@@ -225,8 +255,13 @@ def build_reviewed_drawing(
             region=region,
             technical_feedback=str(raw_issue.get("technical_feedback") or raw_issue.get("message") or "Review this finding."),
             rubric_rule_id=str(raw_issue["rubric_rule_id"]) if raw_issue.get("rubric_rule_id") is not None else None,
-            deduction=float(raw_issue.get("deduction") or 0.0),
+            deduction=applied_deduction,
+            raw_deduction=raw_deduction,
+            applied_deduction=applied_deduction,
+            deduction_status=deduction_status,
+            suppression_reason=suppression_reason,
             confidence=str(raw_issue.get("confidence") or "instructor_review_required"),
+            classification=str(raw_issue.get("classification") or "primary"),
             provenance="comparison",
             measurement_json=json.dumps(deepcopy(raw_issue.get("measurement")), sort_keys=True, separators=(",", ":"), default=str),
         ))
@@ -250,7 +285,12 @@ def build_reviewed_drawing(
             technical_feedback=str(finding.get("message") or "Review the reference drawing."),
             rubric_rule_id=None,
             deduction=0.0,
+            raw_deduction=0.0,
+            applied_deduction=0.0,
+            deduction_status="none",
+            suppression_reason=None,
             confidence="verified",
+            classification="informational",
             provenance="reference_validation",
             measurement_json="null",
         ))

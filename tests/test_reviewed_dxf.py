@@ -96,6 +96,21 @@ def test_review_model_preserves_missing_extra_and_inaccurate_provenance():
     assert by_id["E-003"].confidence == "verified"
 
 
+
+def test_review_model_distinguishes_raw_applied_and_suppressed_deductions():
+    reference = drawing([entity("R-M", "line", [(0, 0), (10, 0)])], (0, 0, 10, 0))
+    raw_issue = issue("E-001", "missing_geometry", reference_id="R-M", deduction=5)
+    raw_issue["applied_deduction"] = 0
+    raw_issue["suppression_reason"] = "fixed missing deduction suppressed by proportional completion policy"
+    raw_issue["classification"] = "primary"
+    reviewed = build_reviewed_drawing(reference, drawing([], (0, 0, 0, 0)), {"score": 98.7, "issues": [raw_issue]})
+    finding = reviewed.issues[0]
+    assert finding.raw_deduction == 5
+    assert finding.applied_deduction == finding.deduction == 0
+    assert finding.deduction_status == "suppressed"
+    assert finding.suppression_reason == raw_issue["suppression_reason"]
+    assert finding.classification == "primary"
+
 def test_svg_contains_expected_visual_conventions_and_dual_overlay():
     svg = render_svg(review_with_all_overlay_roles())
     assert 'data-role="missing"' in svg and 'class="missing"' in svg

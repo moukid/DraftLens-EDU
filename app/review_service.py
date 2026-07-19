@@ -140,9 +140,11 @@ def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
         "rubric": output.rubric.model_dump(),
+        "completion_scoring_mode": output.rubric.completion_scoring_mode,
         "units": reviewed.units,
         "extents": list(reviewed.extents),
         "issues": issues,
+        "score_breakdown": output.comparison["score_breakdown"],
         "unsupported_entities": {
             "reference": reviewed.reference_unsupported,
             "student": reviewed.student_unsupported,

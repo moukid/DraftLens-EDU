@@ -72,6 +72,10 @@ def test_proportional_completion_suppresses_fixed_missing_rule():
     assert missing["raw_deduction"] == 5
     assert missing["applied"] == 0
     assert "proportional completion policy" in missing["suppression_reason"]
+    missing_issue = next(issue for issue in result["issues"] if issue["category"] == "missing_geometry")
+    assert missing_issue["deduction"] == 5
+    assert missing_issue["applied_deduction"] == 0
+    assert missing_issue["suppression_reason"] == missing["suppression_reason"]
     assert completion["applied"] > 0
     assert sum(entry["applied"] for entry in result["audit_trail"]) == result[
         "deduction"

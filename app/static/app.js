@@ -17,6 +17,7 @@ const byId = (id) => document.getElementById(id);
 const referenceInput = byId("reference-file");
 const studentInput = byId("student-file");
 const fallbackInput = byId("fallback-mode");
+const completionPolicyInput = byId("completion-scoring-mode");
 const approveButton = byId("approve-rubric");
 const reviewButton = byId("run-review");
 
@@ -25,6 +26,12 @@ studentInput.addEventListener("change", () => selectStudent(studentInput.files[0
 fallbackInput.addEventListener("change", updateReviewAvailability);
 approveButton.addEventListener("click", approveRubric);
 reviewButton.addEventListener("click", runReview);
+completionPolicyInput.addEventListener("change", () => {
+  if (!state.provisionalRubric) return;
+  state.provisionalRubric.completion_scoring_mode = completionPolicyInput.value;
+  renderCompletionPolicySummary(completionPolicyInput.value);
+  markRubricDirty();
+});
 byId("rubric-name").addEventListener("input", (event) => {
   if (!state.provisionalRubric) return;
   state.provisionalRubric.title = event.target.value;
@@ -87,6 +94,7 @@ function setLoading(loading, message) {
   referenceInput.disabled = loading;
   studentInput.disabled = loading;
   fallbackInput.disabled = loading || Boolean(state.rubricId);
+  completionPolicyInput.disabled = loading || Boolean(state.rubricId);
   reviewButton.textContent = loading && message === "review" ? "Generating review…" : "Generate visual review";
   approveButton.textContent = loading && message === "approval" ? "Approving…" : "Approve rubric";
   updateWeightTotal();
@@ -141,6 +149,8 @@ function resetReferenceDependentState() {
   byId("student-name").textContent = "Choose a .dxf file";
   fallbackInput.checked = false;
   fallbackInput.disabled = false;
+  completionPolicyInput.disabled = false;
+  byId("completion-policy-summary").textContent = "";
   byId("analysis-summary").hidden = true;
   byId("rubric-editor").hidden = true;
   byId("rubric-empty").hidden = false;
@@ -237,6 +247,9 @@ function renderRubricEditor() {
   byId("rubric-empty").hidden = true;
   byId("rubric-editor").hidden = false;
   byId("rubric-name").value = rubric.title || "";
+  completionPolicyInput.value = rubric.completion_scoring_mode || "rule_based";
+  completionPolicyInput.disabled = Boolean(state.rubricId);
+  renderCompletionPolicySummary(completionPolicyInput.value);
   const categories = byId("rubric-categories");
   clearChildren(categories);
   rubric.categories.forEach((category, index) => {
@@ -276,6 +289,21 @@ function renderRubricEditor() {
   updateWeightTotal();
 }
 
+function completionPolicyLabel(mode) {
+  return mode === "proportional" ? "Proportional completion" : "Rule-based deductions";
+}
+
+function completionPolicyDescription(mode) {
+  return mode === "proportional"
+    ? "Missing-item rule deductions are suppressed; the completion category deducts in proportion to unfinished required geometry."
+    : "Enabled issue rules apply directly; the completion percentage is informational and adds no separate deduction.";
+}
+
+function renderCompletionPolicySummary(mode) {
+  byId("completion-policy-summary").textContent = completionPolicyDescription(mode);
+}
+
+
 function rubricWeightTotal() {
   if (!state.provisionalRubric) return 0;
   return state.provisionalRubric.categories.reduce((sum, category) => sum + Number(category.weight || 0), 0);
@@ -294,6 +322,7 @@ function markRubricDirty() {
   if (state.rubricId) {
     state.rubricId = null;
     fallbackInput.disabled = false;
+    completionPolicyInput.disabled = false;
   }
   if (state.provisionalRubric) state.provisionalRubric.approved = false;
   byId("rubric-status").textContent = "Changes require instructor approval.";
@@ -316,7 +345,8 @@ async function approveRubric() {
     state.provisionalRubric = JSON.parse(JSON.stringify(response.rubric));
     fallbackInput.checked = false;
     fallbackInput.disabled = true;
-    byId("rubric-status").textContent = "Approved and associated with this reference.";
+    completionPolicyInput.disabled = true;
+    byId("rubric-status").textContent = "Approved and associated. Completion policy: " + completionPolicyLabel(state.provisionalRubric.completion_scoring_mode) + ".";
     setWorkflowStatus("Rubric approved — add student drawing", "success");
   } catch (error) {
     showError(error);
@@ -384,7 +414,9 @@ function renderResults(review) {
   ];
   byId("result-unsupported").textContent = String(unsupported.length);
   const source = humanize(review.rubric_selection && review.rubric_selection.source);
-  byId("result-rubric").textContent = (review.rubric.title || "Applied rubric") + " · " + source;
+  const completionMode = review.completion_scoring_mode || review.rubric.completion_scoring_mode || "rule_based";
+  byId("result-rubric").textContent = (review.rubric.title || "Applied rubric") + " · " + source + " · " + completionPolicyLabel(completionMode);
+  renderScoreBreakdown(review, completionMode);
   const critical = review.issues.filter((issue) => issue.severity === "critical").length;
   byId("critical-summary").textContent = critical ? critical + " critical issue(s)" : "No critical issues";
   renderSafeSvg(review.svg);
@@ -394,6 +426,30 @@ function renderResults(review) {
   if (review.issues.length) selectIssue(review.issues[0].issue_id, false);
   byId("review-results").scrollIntoView();
 }
+function renderScoreBreakdown(review, completionMode) {
+  const breakdown = review.score_breakdown || {};
+  const categories = breakdown.category_subtotals || [];
+  const container = byId("score-breakdown-categories");
+  clearChildren(container);
+  categories.forEach((category) => {
+    const row = document.createElement("div");
+    row.className = "score-breakdown-row";
+    const name = document.createElement("strong");
+    name.textContent = category.name || humanize(category.id);
+    const detail = document.createElement("span");
+    detail.className = "score-breakdown-values";
+    detail.textContent =
+      "Earned " + formatNumber(category.score) + " / " + formatNumber(category.weight) +
+      " · Applied " + formatDeduction(category.deduction);
+    row.append(name, detail);
+    container.append(row);
+  });
+  byId("result-applied-deduction").textContent = formatDeduction(breakdown.total_applied_deduction);
+  byId("result-final-score").textContent = formatNumber(breakdown.final_score) + " / 100";
+  byId("result-policy").textContent = completionPolicyLabel(completionMode) + ". " + completionPolicyDescription(completionMode);
+}
+
+
 
 function isUnsafeUrlValue(value) {
   const normalized = value.trim().toLowerCase();
@@ -483,8 +539,11 @@ function renderIssueList() {
     feedback.textContent = issue.technical_feedback;
     const evidence = document.createElement("span");
     evidence.className = "issue-card-evidence";
-    evidence.textContent = humanize(issue.severity) + " · " + formatDeduction(issue.deduction);
-    button.append(top, feedback, evidence);
+    evidence.textContent = humanize(issue.severity) + " · Applied: " + formatDeduction(appliedDeduction(issue));
+    const deductionDetail = document.createElement("span");
+    deductionDetail.className = "issue-card-deduction";
+    deductionDetail.textContent = formatDeductionDetail(issue);
+    button.append(top, feedback, evidence, deductionDetail);
     button.addEventListener("click", () => selectIssue(issue.issue_id, true));
     list.append(button);
   });
@@ -518,7 +577,9 @@ function renderFeedback(issue) {
   byId("evidence-actual").textContent = issue.source_entity_id || "Not applicable";
   byId("evidence-measurement").textContent = formatMeasurement(issue.measurement);
   byId("evidence-rule").textContent = issue.rubric_rule_id || "Validation finding";
-  byId("evidence-deduction").textContent = formatDeduction(issue.deduction);
+  byId("evidence-deduction").textContent = formatDeduction(appliedDeduction(issue));
+  byId("evidence-raw-deduction").textContent = formatDeduction(rawDeduction(issue));
+  byId("evidence-deduction-status").textContent = deductionStatusText(issue);
   byId("evidence-confidence").textContent = humanize(issue.confidence);
 
   const commands = commandsForIssue(issue);
@@ -558,6 +619,30 @@ function formatEvidenceValue(value) {
   }
   return String(value ?? "—");
 }
+
+function appliedDeduction(issue) {
+  return Number(issue.applied_deduction ?? issue.deduction ?? 0);
+}
+
+function rawDeduction(issue) {
+  return Number(issue.raw_deduction ?? issue.deduction ?? 0);
+}
+
+function deductionStatusText(issue) {
+  if (issue.suppression_reason) return "Suppressed: " + issue.suppression_reason;
+  if (issue.deduction_status === "capped") return "Capped by rubric limits";
+  if (appliedDeduction(issue) > 0) return "Applied";
+  return "Not scored";
+}
+
+function formatDeductionDetail(issue) {
+  return (
+    "Raw rule: " + formatDeduction(rawDeduction(issue)) +
+    " | Applied: " + formatDeduction(appliedDeduction(issue)) +
+    " | " + deductionStatusText(issue)
+  );
+}
+
 
 function formatDeduction(value) {
   const number = Number(value || 0);

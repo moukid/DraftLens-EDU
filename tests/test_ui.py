@@ -45,6 +45,13 @@ def test_visual_review_page_exposes_complete_semantic_workflow():
         "analysis-summary",
         "rubric-editor",
         "rubric-categories",
+        "completion-scoring-mode",
+        "completion-policy-summary",
+        "score-breakdown-categories",
+        "result-policy",
+        "result-applied-deduction",
+        "evidence-raw-deduction",
+        "evidence-deduction-status",
         "approve-rubric",
         "fallback-mode",
         "student-file",
@@ -144,6 +151,21 @@ def test_issue_filters_and_bidirectional_issue_selection_are_wired():
     assert 'event.target.closest("[data-issue-id]")' in javascript
     assert 'querySelectorAll("#drawing-viewport [data-issue-id]")' in javascript
     assert 'element.getAttribute("data-issue-id") === issueId' in javascript
+
+
+def test_completion_policy_and_applied_deduction_contract_are_visible():
+    response, parser = page()
+    assert parser.elements["completion-scoring-mode"][0] == "select"
+    assert "Proportional completion" in response.text
+    assert "Rule-based deductions" in response.text
+    javascript = client.get("/static/app.js").text
+    assert "state.provisionalRubric.completion_scoring_mode" in javascript
+    assert "completionPolicyDescription" in javascript
+    assert "review.score_breakdown" in javascript
+    assert 'formatDeduction(appliedDeduction(issue))' in javascript
+    assert 'formatDeduction(rawDeduction(issue))' in javascript
+    assert "issue.suppression_reason" in javascript
+    assert 'byId("evidence-deduction-status")' in javascript
 
 
 def test_stage_2b_ui_contains_no_forbidden_feature_hooks():

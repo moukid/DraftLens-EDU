@@ -90,6 +90,7 @@ def score_issues(
         elif not rule or not category:
             suppression_reason = "no enabled rubric rule"
 
+        issue.suppression_reason = suppression_reason
         if suppression_reason:
             issue.applied_deduction = 0.0
             audit.append(

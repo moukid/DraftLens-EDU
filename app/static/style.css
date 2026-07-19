@@ -37,7 +37,7 @@ body {
   line-height: 1.45;
 }
 
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { color: inherit; }
 button, input[type="file"], input[type="checkbox"] { cursor: pointer; }
 button:disabled, input:disabled { cursor: not-allowed; opacity: .58; }
@@ -110,7 +110,7 @@ ul { padding-left: 18px; }
   padding-right: 2px;
 }
 
-.panel, .results-bar, .drawing-panel, .issues-panel, .feedback-panel, .review-placeholder {
+.panel, .results-bar, .score-breakdown, .drawing-panel, .issues-panel, .feedback-panel, .review-placeholder {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
@@ -213,7 +213,7 @@ dd { margin: 2px 0 0; font-weight: 800; overflow-wrap: anywhere; }
 }
 
 .field { display: grid; gap: 5px; font-size: 12px; font-weight: 700; }
-.field input, .rubric-row input, .tolerance-grid input {
+.field input, .field select, .rubric-row input, .tolerance-grid input {
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
@@ -238,6 +238,9 @@ fieldset legend { padding: 0 4px; }
 .tolerance-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .tolerance-grid label { color: var(--muted); font-size: 10px; font-weight: 700; }
 .tolerance-grid input { margin-top: 3px; padding: 6px; }
+.policy-fieldset { background: var(--surface-muted); }
+.policy-summary { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
+.policy-fieldset select:disabled { background: #edf1ef; color: #3d4c45; }
 
 .primary-button {
   width: 100%;
@@ -319,6 +322,24 @@ fieldset legend { padding: 0 4px; }
 .score-metric dd { display: flex; align-items: baseline; gap: 3px; }
 .score-metric strong { color: #165a36; font-size: 25px; line-height: 1; }
 .score-metric span { color: #4f705f; font-size: 11px; }
+.score-breakdown {
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: minmax(210px, .8fr) minmax(320px, 1.4fr) minmax(190px, .6fr);
+  gap: 18px;
+  align-items: center;
+}
+.score-breakdown-heading p { margin-bottom: 0; font-size: 11px; }
+.score-breakdown-categories { display: grid; gap: 5px; }
+.score-breakdown-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; }
+.score-breakdown-row + .score-breakdown-row { border-top: 1px solid var(--line); padding-top: 5px; }
+.score-breakdown-values { color: var(--muted); text-align: right; }
+.score-breakdown-total { margin: 0; display: grid; gap: 6px; }
+.score-breakdown-total div { display: flex; justify-content: space-between; gap: 12px; }
+.score-breakdown-total div:last-child { border-top: 1px solid var(--line-strong); padding-top: 6px; }
+.score-breakdown-total dd { color: var(--green); }
+
+
 
 .drawing-panel { overflow: hidden; }
 .panel-heading {
@@ -438,9 +459,10 @@ fieldset legend { padding: 0 4px; }
 .issue-card-top { display: flex; justify-content: space-between; gap: 12px; }
 .issue-card-top strong { font-size: 12px; }
 .issue-card-top > span { color: var(--muted); font-family: ui-monospace, "Cascadia Code", monospace; font-size: 10px; }
-.issue-card-message, .issue-card-evidence { display: block; }
+.issue-card-message, .issue-card-evidence, .issue-card-deduction { display: block; }
 .issue-card-message { margin-top: 4px; color: #4d5b62; font-size: 12px; }
 .issue-card-evidence { margin-top: 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.issue-card-deduction { margin-top: 2px; color: #6f5a38; font-size: 10px; }
 
 #issue-empty { margin: 10px; }
 .feedback-panel { padding: 16px; }
@@ -498,6 +520,7 @@ footer {
 @media (max-width: 1120px) {
   .workspace { grid-template-columns: 330px minmax(0, 1fr); }
   .results-bar { grid-template-columns: 1fr; gap: 12px; }
+  .score-breakdown { grid-template-columns: 1fr; gap: 12px; }
   .drawing-viewport { min-height: 440px; height: 52vh; }
   .review-detail-grid { grid-template-columns: 1fr; }
 }

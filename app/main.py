@@ -141,6 +141,7 @@ async def rubric_suggest(reference: UploadFile = File(...)):
     return {
         "reference_id": reference_fingerprint(reference_bytes),
         "analysis": analyze_assignment(drawing),
+        "completion_scoring_mode": suggested_rubric.completion_scoring_mode,
         "rubric": suggested_rubric.model_dump(),
         "provisional": True,
         "requires_instructor_approval": True,
@@ -153,7 +154,12 @@ def rubric_approve(request: RubricApprovalRequest):
     RUBRICS[rubric_id] = approved
     RUBRIC_REFERENCES[rubric_id] = request.reference_id
     REFERENCE_RUBRICS[request.reference_id] = rubric_id
-    return {"rubric_id": rubric_id, "reference_id": request.reference_id, "rubric": approved.model_dump()}
+    return {
+        "rubric_id": rubric_id,
+        "reference_id": request.reference_id,
+        "completion_scoring_mode": approved.completion_scoring_mode,
+        "rubric": approved.model_dump(),
+    }
 @app.post("/api/report",response_class=HTMLResponse)
 async def report(payload:dict):
     return render("report.html",data_json=json.dumps(payload).replace("</","<\\/"),score=payload.get("score",0),issues=payload.get("issues",[]),feedback=payload.get("feedback",[]))

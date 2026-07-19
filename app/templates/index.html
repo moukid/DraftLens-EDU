@@ -45,6 +45,16 @@
           <label class="field">Rubric name<input id="rubric-name" type="text" maxlength="160"></label>
           <div class="section-label"><span>Category weights</span><strong id="weight-total">0%</strong></div>
           <div id="rubric-categories" class="rubric-categories"></div>
+          <fieldset class="policy-fieldset">
+            <legend>Completion scoring policy</legend>
+            <label class="field" for="completion-scoring-mode">How incomplete work is scored
+              <select id="completion-scoring-mode">
+                <option value="proportional">Proportional completion</option>
+                <option value="rule_based">Rule-based deductions</option>
+              </select>
+            </label>
+            <p id="completion-policy-summary" class="policy-summary"></p>
+          </fieldset>
           <fieldset>
             <legend>Geometry tolerances</legend>
             <div class="tolerance-grid">
@@ -95,6 +105,18 @@
             <div><dt>Unsupported</dt><dd id="result-unsupported">—</dd></div>
           </dl>
         </section>
+        <section class="score-breakdown" aria-labelledby="score-breakdown-heading">
+          <div class="score-breakdown-heading">
+            <p class="eyebrow">Scoring contract</p>
+            <h2 id="score-breakdown-heading">Score breakdown</h2>
+            <p id="result-policy">—</p>
+          </div>
+          <div id="score-breakdown-categories" class="score-breakdown-categories"></div>
+          <dl class="score-breakdown-total">
+            <div><dt>Total applied deduction</dt><dd id="result-applied-deduction">—</dd></div>
+            <div><dt>Final score</dt><dd id="result-final-score">—</dd></div>
+          </dl>
+        </section>
 
         <section class="drawing-panel" aria-labelledby="drawing-heading">
           <div class="panel-heading"><div><p class="eyebrow">Expected vs actual</p><h2 id="drawing-heading">Reviewed drawing</h2></div><p id="critical-summary" class="critical-summary"></p></div>
@@ -134,7 +156,9 @@
                 <div><dt>Student entity</dt><dd id="evidence-actual">—</dd></div>
                 <div><dt>Measurement</dt><dd id="evidence-measurement">—</dd></div>
                 <div><dt>Rule</dt><dd id="evidence-rule">—</dd></div>
-                <div><dt>Deduction</dt><dd id="evidence-deduction">—</dd></div>
+                <div><dt>Applied deduction</dt><dd id="evidence-deduction">—</dd></div>
+                <div><dt>Raw rule deduction</dt><dd id="evidence-raw-deduction">—</dd></div>
+                <div><dt>Deduction status</dt><dd id="evidence-deduction-status">—</dd></div>
                 <div><dt>Confidence</dt><dd id="evidence-confidence">—</dd></div>
               </dl>
               <div id="feedback-commands" hidden><h3>Suggested commands</h3><ul id="command-list" class="command-list"></ul></div>
