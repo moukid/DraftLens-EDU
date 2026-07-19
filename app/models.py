@@ -6,6 +6,9 @@ from typing import Any, Literal
 EntityKind = Literal["line", "polyline", "circle", "arc", "ellipse", "spline", "text", "dimension"]
 Severity = Literal["critical", "major", "moderate", "minor", "warning"]
 Confidence = Literal["verified", "high", "moderate", "instructor_review_required"]
+FindingClassification = Literal[
+    "primary", "derived", "supporting_evidence", "suppressed", "informational"
+]
 
 @dataclass(slots=True)
 class Entity:
@@ -56,7 +59,9 @@ class Issue:
     severity: Severity
     message: str
     deduction: float
+    applied_deduction: float = 0.0
     confidence: Confidence = "verified"
+    classification: FindingClassification = "primary"
     code: str | None = None
     reference_entity_id: str | None = None
     student_entity_id: str | None = None
@@ -68,6 +73,10 @@ class Issue:
     recommended_commands: list[str] = field(default_factory=list)
     expected: Any = None
     actual: Any = None
+    derived_evidence: list[dict[str, Any]] = field(default_factory=list)
+    supporting_evidence: list[dict[str, Any]] = field(default_factory=list)
+    suppressed_findings: list[dict[str, Any]] = field(default_factory=list)
+    suppression_reason: str | None = None
     status: Literal["accepted", "rejected"] = "accepted"
 
     def to_dict(self) -> dict[str, Any]:

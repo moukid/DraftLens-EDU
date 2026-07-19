@@ -32,6 +32,7 @@ class Rubric(BaseModel):
     categories: list[RubricCategory]
     tolerances: ToleranceProfile = Field(default_factory=ToleranceProfile)
     normalization_mode: Literal["strict", "translation", "translation_rotation", "instructor_defined"] = "translation"
+    completion_scoring_mode: Literal["rule_based", "proportional"] = "rule_based"
     accepted_alternatives: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")

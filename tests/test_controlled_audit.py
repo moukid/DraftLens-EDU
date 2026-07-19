@@ -142,18 +142,10 @@ def test_missing_line_issue_location_matches_expected_geometry(audit_outputs):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_missing_line_does_not_reduce_completion_in_addition_to_rule(audit_outputs):
     assert breakdown(audit_outputs, MISSING, "completion")["deduction"] == 0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_missing_line_current_five_point_rule_produces_score_95(audit_outputs):
     result = comparison(audit_outputs, MISSING)
     assert result["deduction"] == 5
@@ -171,20 +163,12 @@ def test_shortened_line_preserves_angle(audit_outputs):
     assert issues(audit_outputs, SHORT, "incorrect_angle") == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_shortened_line_has_only_one_primary_length_issue(audit_outputs):
     assert [item["category"] for item in issues(audit_outputs, SHORT)] == [
         "incorrect_length"
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_shortened_line_centroid_shift_is_derived_evidence(audit_outputs):
     length_issue = issues(audit_outputs, SHORT, "incorrect_length")[0]
     derived = length_issue.get("derived_evidence", [])
@@ -237,20 +221,12 @@ def test_rotated_line_records_expected_and_actual_angle(audit_outputs):
     assert angle_issue[0]["measurement"]["actual"] == pytest.approx(40)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_rotated_line_has_only_one_primary_angle_issue(audit_outputs):
     assert [item["category"] for item in issues(audit_outputs, ROTATED_LINE)] == [
         "incorrect_angle"
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_rotated_line_centroid_shift_is_derived_evidence(audit_outputs):
     angle_issue = issues(audit_outputs, ROTATED_LINE, "incorrect_angle")[0]
     derived = angle_issue.get("derived_evidence", [])
@@ -334,10 +310,6 @@ def test_radius_change_does_not_change_drawing_normalization(audit_outputs):
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_radius_change_is_one_causal_radius_deduction(audit_outputs):
     result = comparison(audit_outputs, RADIUS)
     assert [item["category"] for item in result["issues"]] == [
@@ -347,18 +319,17 @@ def test_radius_change_is_one_causal_radius_deduction(audit_outputs):
     assert result["score"] == 97
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
-def test_radius_change_preserves_diameter_and_bounds_as_derived_evidence(
+def test_radius_change_preserves_size_changes_as_supporting_evidence(
     audit_outputs,
 ):
     radius_issue = issues(audit_outputs, RADIUS, "incorrect_radius")[0]
-    derived = {item["property"]: item for item in radius_issue["derived_evidence"]}
-    assert derived["diameter"]["expected"] == pytest.approx(100)
-    assert derived["diameter"]["actual"] == pytest.approx(80)
-    assert "bounding_box" in derived
+    evidence = {
+        item["property"]: item for item in radius_issue["supporting_evidence"]
+    }
+    assert evidence["diameter"]["expected"] == pytest.approx(100)
+    assert evidence["diameter"]["actual"] == pytest.approx(80)
+    assert "circumference" in evidence
+    assert "bounding_box" in evidence
 
 
 def test_strict_mode_prevents_radius_extent_shift():
@@ -370,10 +341,6 @@ def test_strict_mode_prevents_radius_extent_shift():
     ] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_strict_mode_consolidates_circle_size_measurements():
     result = strict_comparison(RADIUS)
     assert [item["category"] for item in result["issues"]] == [
@@ -433,10 +400,6 @@ def test_duplicate_specific_rule_is_one_point_file_quality_policy(audit_outputs)
     assert breakdown(audit_outputs, DUPLICATE, "quality")["deduction"] == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_duplicate_is_one_consolidated_file_quality_deduction(audit_outputs):
     result = comparison(audit_outputs, DUPLICATE)
     assert [item["category"] for item in result["issues"]] == [
@@ -460,10 +423,6 @@ def test_duplicate_recommends_overkill_and_erase(audit_outputs):
     assert {"OVERKILL", "ERASE"} <= commands
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_duplicate_issue_includes_coincident_geometry_evidence(audit_outputs):
     evidence = issues(audit_outputs, DUPLICATE, "duplicate_geometry")[0][
         "measurement"
@@ -512,10 +471,6 @@ def test_disconnected_corner_reports_broken_connectivity(audit_outputs):
     assert categories & {"endpoint_gap", "disconnected_geometry", "connectivity"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_disconnected_corner_centroid_shift_is_derived_evidence(audit_outputs):
     length_issue = issues(audit_outputs, DISCONNECTED, "incorrect_length")[0]
     derived = length_issue.get("derived_evidence", [])
@@ -523,18 +478,10 @@ def test_disconnected_corner_centroid_shift_is_derived_evidence(audit_outputs):
     assert centroid["actual"] == pytest.approx(2.5)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_disconnected_corner_has_no_independent_position_deduction(audit_outputs):
     assert issues(audit_outputs, DISCONNECTED, "incorrect_position") == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_disconnected_corner_has_one_scored_causal_deduction(audit_outputs):
     applied = [
         item
@@ -562,3 +509,31 @@ def test_category_deductions_remain_within_current_caps(audit_outputs):
     for output in audit_outputs.values():
         for category in output.comparison["rubric_breakdown"]:
             assert category["deduction"] <= category["weight"]
+
+def test_all_controlled_deductions_are_visible_and_reconcile(audit_outputs):
+    required_fields = {
+        "primary_issue_id",
+        "category",
+        "applied_rule",
+        "raw_deduction",
+        "deduction_after_rule_cap",
+        "deduction_after_category_cap",
+        "derived_observations",
+        "applied",
+    }
+    for output in audit_outputs.values():
+        result = output.comparison
+        visible = round(
+            sum(float(entry["applied"]) for entry in result["audit_trail"]),
+            2,
+        )
+        category_total = round(
+            sum(category["deduction"] for category in result["rubric_breakdown"]),
+            2,
+        )
+        assert visible == result["deduction"] == category_total
+        assert result["score_breakdown"]["total_applied_deduction"] == visible
+        assert result["score_breakdown"]["final_score"] == result["score"]
+        for entry in result["audit_trail"]:
+            if entry.get("primary_issue_id"):
+                assert required_fields <= entry.keys()

@@ -135,10 +135,13 @@ async def assignment_analyze(reference: UploadFile = File(...)):
 async def rubric_suggest(reference: UploadFile = File(...)):
     reference_bytes = await read_upload(reference)
     drawing = parse_dxf_bytes(reference_bytes, source="reference")
+    suggested_rubric = default_rubric(
+        reference.filename or "Assignment rubric"
+    ).model_copy(update={"completion_scoring_mode": "proportional"})
     return {
         "reference_id": reference_fingerprint(reference_bytes),
         "analysis": analyze_assignment(drawing),
-        "rubric": default_rubric(reference.filename or "Assignment rubric").model_dump(),
+        "rubric": suggested_rubric.model_dump(),
         "provisional": True,
         "requires_instructor_approval": True,
     }

@@ -5,10 +5,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from statistics import median
 from typing import Any
-from shapely.geometry import LineString
+from .causal_analysis import CausalFinding, analyze_comparison
 from .dxf import entity_length
 from .models import Drawing, Entity, Issue
 from .rubric import Rubric, ToleranceProfile, default_rubric, rubric_rule_map
+from .scoring import score_issues
 
 @dataclass(slots=True)
 class Tolerances:
@@ -469,24 +470,38 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         student_normalization,
     ) = _prepare_comparison_geometry(reference, student, rubric, tolerance)
     matched, missing, extra = _match_entities(reference, matching_student, tolerance)
+    analysis = analyze_comparison(
+        reference,
+        matching_student,
+        matched,
+        missing,
+        extra,
+        tolerance,
+    )
     issues: list[Issue] = []
 
-    def add(category, ref=None, stu=None, prop=None, expected=None, actual=None, tolerance_value=None, confidence="verified"):
-        rule_pair = rules.get(category)
+    def add(finding: CausalFinding) -> None:
+        rule_pair = rules.get(finding.category)
         if rule_pair:
             rule, _ = rule_pair
-            deduction, severity, rule_id, commands = rule.deduction, rule.severity, rule.id, rule.commands
+            deduction = rule.deduction
+            severity = rule.severity
+            rule_id = rule.id
+            commands = rule.commands
         else:
-            deduction, severity, rule_id, commands = 0.0, "warning", None, []
-        location = _center(ref or stu) if ref is not None or stu is not None else None
-        deviation = None
-        if isinstance(expected, (int,float)) and isinstance(actual, (int,float)):
-            deviation = actual-expected
-        measurement = {"property": prop, "expected": expected, "actual": actual, "deviation": deviation, "tolerance": tolerance_value, "unit": reference.units} if prop else None
+            deduction = 0.0
+            severity = "warning"
+            rule_id = None
+            commands = []
+        reference_entity = finding.reference_entity
+        student_entity = finding.student_entity
+        location_entity = reference_entity or student_entity
+        location = _center(location_entity) if location_entity is not None else None
+        measurement = deepcopy(finding.measurement)
         action = {
             "missing_geometry": "Add the required geometry at the ghosted location.",
             "extra_geometry": "Remove the unmatched construction geometry if it is not an accepted alternative.",
-            "incorrect_position": f"Move the entity by {abs(deviation or 0):.3f} drawing units toward the expected location.",
+            "incorrect_position": "Move the entity toward the expected location.",
             "incorrect_length": "Adjust the entity length to the expected value.",
             "incorrect_angle": "Rotate the entity to the expected angle.",
             "incorrect_radius": "Change the entity to the expected radius.",
@@ -494,66 +509,88 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
             "open_polyline": "Close the required boundary.",
             "duplicate_geometry": "Remove the coincident duplicate entity.",
             "unsupported_entity": "Review this unsupported entity manually.",
-        }.get(category, "Review this finding.")
-        if category in {"incorrect_length", "incorrect_angle", "incorrect_radius"} and isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
-            labels = {"incorrect_length": ("length", ""), "incorrect_angle": ("angle", " degrees"), "incorrect_radius": ("radius", "")}
-            label, suffix = labels[category]
-            action = f"Adjust the {label} from {actual:.3f}{suffix} to {expected:.3f}{suffix}."
-        issue = Issue(
-            id=f"E-{len(issues)+1:03d}", category=category, code=_legacy_code(category,ref,stu),
-            severity=severity, confidence=confidence, deduction=deduction,
-            reference_entity_id=ref.id if ref else None, student_entity_id=stu.id if stu else None,
-            location=location, measurement=measurement, rubric_rule_id=rule_id,
-            technical_feedback=action, recommended_commands=list(commands), expected=expected, actual=actual,
-            message=action,
+        }.get(finding.category, "Review this finding.")
+        if (
+            finding.category
+            in {"incorrect_length", "incorrect_angle", "incorrect_radius"}
+            and isinstance(finding.expected, (int, float))
+            and isinstance(finding.actual, (int, float))
+        ):
+            labels = {
+                "incorrect_length": ("length", ""),
+                "incorrect_angle": ("angle", " degrees"),
+                "incorrect_radius": ("radius", ""),
+            }
+            label, suffix = labels[finding.category]
+            action = (
+                f"Adjust the {label} from {finding.actual:.3f}{suffix} "
+                f"to {finding.expected:.3f}{suffix}."
+            )
+        elif (
+            finding.category == "incorrect_position"
+            and measurement is not None
+            and isinstance(measurement.get("actual"), (int, float))
+        ):
+            action = (
+                f"Move the entity by {abs(measurement['actual']):.3f} "
+                "drawing units toward the expected location."
+            )
+        issues.append(
+            Issue(
+                id=f"E-{len(issues) + 1:03d}",
+                category=finding.category,
+                code=_legacy_code(
+                    finding.category, reference_entity, student_entity
+                ),
+                severity=severity,
+                confidence=finding.confidence,
+                classification=finding.classification,
+                deduction=deduction,
+                reference_entity_id=(
+                    reference_entity.id if reference_entity else None
+                ),
+                student_entity_id=student_entity.id if student_entity else None,
+                location=location,
+                measurement=measurement,
+                rubric_rule_id=rule_id,
+                technical_feedback=action,
+                recommended_commands=list(commands),
+                expected=finding.expected,
+                actual=finding.actual,
+                derived_evidence=deepcopy(finding.derived_evidence),
+                supporting_evidence=deepcopy(finding.supporting_evidence),
+                suppressed_findings=deepcopy(finding.suppressed_findings),
+                message=action,
+            )
         )
-        issues.append(issue)
 
-    for ref in missing:
-        add("missing_geometry", ref=ref)
-    for stu in extra:
-        add("extra_geometry", stu=stu)
-    for ref, stu, confidence_value in matched:
-        confidence = "verified" if confidence_value >= .85 else "high" if confidence_value >= .55 else "moderate"
-        position = _distance(ref,stu)
-        if position > tolerance.position:
-            add("incorrect_position",ref,stu,"centroid_distance",0.0,position,tolerance.position,confidence)
-        lr, ls = entity_length(ref), entity_length(stu)
-        if lr is not None and ls is not None and abs(lr-ls) > tolerance.length:
-            add("incorrect_length",ref,stu,"length",lr,ls,tolerance.length,confidence)
-        ar, ass = _angle(ref), _angle(stu)
-        if ar is not None and ass is not None and _angle_delta(ar,ass) > tolerance.angle:
-            add("incorrect_angle",ref,stu,"angle",ar,ass,tolerance.angle,confidence)
-        if ref.kind == "dimension" and ref.measurement is not None and stu.measurement is not None and abs(ref.measurement-stu.measurement) > tolerance.dimension:
-            add("incorrect_length",ref,stu,"dimension_measurement",ref.measurement,stu.measurement,tolerance.dimension,confidence)
-        if ref.radius is not None and stu.radius is not None and abs(ref.radius-stu.radius) > tolerance.radius:
-            add("incorrect_radius",ref,stu,"radius",ref.radius,stu.radius,tolerance.radius,confidence)
-        if ref.kind == "arc" and stu.kind == "arc":
-            span_r = ((ref.end_angle or 0)-(ref.start_angle or 0))%360
-            span_s = ((stu.end_angle or 0)-(stu.start_angle or 0))%360
-            if abs(span_r-span_s) > tolerance.angle:
-                add("incorrect_angle",ref,stu,"arc_span",span_r,span_s,tolerance.angle,confidence)
-        if ref.kind == "polyline":
-            if ref.closed and not stu.closed:
-                add("open_polyline",ref,stu,"closed",True,False,0,confidence)
-            if len(ref.points) != len(stu.points):
-                add("incorrect_shape",ref,stu,"vertex_count",len(ref.points),len(stu.points),0,confidence)
-        if ref.kind == "spline" and len(ref.points)>1 and len(stu.points)>1:
-            hausdorff = LineString(ref.points).hausdorff_distance(LineString(stu.points))
-            if hausdorff > tolerance.position:
-                add("incorrect_shape",ref,stu,"sampled_hausdorff",0.0,hausdorff,tolerance.position,"moderate")
+    for finding in analysis.findings:
+        add(finding)
 
-    signatures = defaultdict(list)
-    for entity in student.entities:
-        signature = (entity.kind, tuple(entity.points), round(entity.radius or 0,6), entity.closed)
-        signatures[signature].append(entity)
-    for group in signatures.values():
-        for duplicate in group[1:]:
-            add("duplicate_geometry",stu=duplicate)
+    def resolve_suppressed(raw: dict[str, Any]) -> dict[str, Any]:
+        resolved = deepcopy(raw)
+        primary_category = resolved.pop("primary_category", None)
+        primary_issue = next(
+            (
+                issue
+                for issue in issues
+                if issue.category == primary_category
+                and issue.reference_entity_id
+                == resolved.get("reference_entity_id")
+                and issue.student_entity_id == resolved.get("student_entity_id")
+            ),
+            None,
+        )
+        resolved["primary_issue_id"] = primary_issue.id if primary_issue else None
+        return resolved
 
-    for unsupported in student.unsupported_entities:
-        add("unsupported_entity", expected="supported entity", actual=unsupported["entity_type"], confidence="instructor_review_required")
-
+    suppressed_findings = [
+        resolve_suppressed(finding) for finding in analysis.suppressed_findings
+    ]
+    for issue in issues:
+        issue.suppressed_findings = [
+            resolve_suppressed(finding) for finding in issue.suppressed_findings
+        ]
     matched_required = len(matched)
     completion = round(100*matched_required/max(len(reference.entities),1),1)
     by_type = {}
@@ -562,41 +599,58 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         count = sum(r.kind==kind for r,_,_ in matched)
         by_type[kind] = round(100*count/max(total,1),1)
 
-    category_deductions, rule_deductions = defaultdict(float), defaultdict(float)
-    audit = []
-    for issue in issues:
-        if issue.confidence not in {"verified","high"} or issue.status == "rejected":
-            audit.append({"issue_id":issue.id,"applied":False,"reason":"requires instructor confirmation"})
-            continue
-        pair = rules.get(issue.category)
-        if not pair:
-            continue
-        rule, category = pair
-        remaining_rule = max(0,(rule.repeat_cap if rule.repeat_cap is not None else 100)-rule_deductions[rule.id])
-        remaining_category = max(0,(category.max_deduction if category.max_deduction is not None else category.weight)-category_deductions[category.id])
-        applied = min(issue.deduction, remaining_rule, remaining_category)
-        rule_deductions[rule.id] += applied
-        category_deductions[category.id] += applied
-        audit.append({"issue_id":issue.id,"rule_id":rule.id,"requested":issue.deduction,"applied":applied})
-    completion_category = next(c for c in rubric.categories if c.id=="completion")
-    completion_deduction = round((100-completion)/100*completion_category.weight,2)
-    category_deductions["completion"] = completion_deduction
-    deduction = round(sum(category_deductions.values()),2)
-    score = max(0.0,round(100-deduction,1))
-    breakdown = []
-    for category in rubric.categories:
-        deducted = round(category_deductions[category.id],2)
-        breakdown.append({"id":category.id,"name":category.name,"weight":category.weight,"deduction":deducted,"score":round(max(0,category.weight-deducted),2)})
-
+    scoring = score_issues(
+        issues,
+        rubric,
+        completion,
+        suppressed_findings,
+    )
+    score = scoring["score"]
+    deduction = scoring["deduction"]
+    breakdown = scoring["rubric_breakdown"]
+    audit = scoring["audit_trail"]
     return {
-        "score":score, "system_score":score, "deduction":deduction,
-        "issues":[i.to_dict() for i in issues],
-        "summary":{"issue_count":len(issues),"by_category":dict(category_deductions)},
-        "rubric_breakdown":breakdown,
-        "completion":{"overall":completion,"by_entity_type":by_type,"by_region":{"all":completion},"by_category":{"completion":completion}},
-        "normalization":{"reference":reference_normalization,"student":student_normalization},
-        "match_count":len(matched), "matches":[{"reference_entity_id":r.id,"student_entity_id":s.id,"confidence":round(c,3)} for r,s,c in matched],
-        "audit_trail":audit,
-        "tolerances":tolerance.model_dump(),
-        "rubric_application":{"approved":rubric.approved,"normalization_mode":rubric.normalization_mode,"category_weights":{c.id:c.weight for c in rubric.categories}},
+        "score": score,
+        "system_score": score,
+        "deduction": deduction,
+        "issues": [issue.to_dict() for issue in issues],
+        "summary": {
+            "issue_count": len(issues),
+            "by_category": scoring["category_deductions"],
+        },
+        "rubric_breakdown": breakdown,
+        "completion": {
+            "overall": completion,
+            "by_entity_type": by_type,
+            "by_region": {"all": completion},
+            "by_category": {"completion": completion},
+        },
+        "normalization": {
+            "reference": reference_normalization,
+            "student": student_normalization,
+        },
+        "match_count": len(matched),
+        "matches": [
+            {
+                "reference_entity_id": reference_entity.id,
+                "student_entity_id": student_entity.id,
+                "confidence": round(confidence, 3),
+            }
+            for reference_entity, student_entity, confidence in matched
+        ],
+        "audit_trail": audit,
+        "observations": [
+            observation.to_dict() for observation in analysis.observations
+        ],
+        "suppressed_findings": suppressed_findings,
+        "score_breakdown": scoring["score_breakdown"],
+        "tolerances": tolerance.model_dump(),
+        "rubric_application": {
+            "approved": rubric.approved,
+            "normalization_mode": rubric.normalization_mode,
+            "completion_scoring_mode": rubric.completion_scoring_mode,
+            "category_weights": {
+                category.id: category.weight for category in rubric.categories
+            },
+        },
     }
