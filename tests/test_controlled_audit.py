@@ -274,10 +274,6 @@ def test_rotated_line_recommends_rotation_not_move(audit_outputs):
     }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_moved_circle_has_one_circle_position_issue(audit_outputs):
     output = audit_outputs[MOVED_CIRCLE]
     circle_ids = {entity.id for entity in output.reference.entities if entity.kind == "circle"}
@@ -290,10 +286,6 @@ def test_moved_circle_has_one_circle_position_issue(audit_outputs):
     assert circle_position[0]["measurement"]["actual"] == pytest.approx(20)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_moved_circle_leaves_all_other_entities_correct(audit_outputs):
     result = comparison(audit_outputs, MOVED_CIRCLE)
     assert result["match_count"] == 19
@@ -301,10 +293,6 @@ def test_moved_circle_leaves_all_other_entities_correct(audit_outputs):
     assert result["score"] == 97
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_moved_circle_does_not_change_drawing_normalization(audit_outputs):
     normalization = comparison(audit_outputs, MOVED_CIRCLE)["normalization"]
     assert normalization["student"]["translation"] == normalization["reference"][
@@ -333,19 +321,12 @@ def test_radius_change_records_expected_and_actual_radius(audit_outputs):
     assert radius_issues[0]["measurement"]["actual"] == pytest.approx(40)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_radius_change_keeps_circle_center_and_other_entities_in_place(audit_outputs):
+    result = comparison(audit_outputs, RADIUS)
     assert issues(audit_outputs, RADIUS, "incorrect_position") == []
-    assert len(issues(audit_outputs, RADIUS)) == 1
+    assert result["match_count"] == 19
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_radius_change_does_not_change_drawing_normalization(audit_outputs):
     normalization = comparison(audit_outputs, RADIUS)["normalization"]
     assert normalization["student"]["translation"] == normalization["reference"][

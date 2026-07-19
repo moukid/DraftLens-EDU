@@ -9,11 +9,23 @@ from app.dxf import DXFParseError, entity_length, parse_dxf_bytes, parse_dxf_pat
 SAMPLES = Path(__file__).parents[1] / "samples"
 
 
-def test_parses_and_normalizes_reference():
+def test_translation_parse_preserves_absolute_reference_coordinates():
     drawing = parse_dxf_path(SAMPLES / "reference.dxf")
-    assert drawing.bbox[0:2] == (0.0, 0.0)
+    assert drawing.bbox == (0.0, -20.0, 100.0, 88.0)
+    assert drawing.normalization["mode"] == "translation"
+    assert drawing.normalization["translation"] == [0.0, 0.0]
+    assert (
+        drawing.normalization["rejection_reason"]
+        == "pending_pairwise_transform_estimation"
+    )
     assert {e.kind for e in drawing.entities} >= {"line", "arc", "text", "dimension"}
-    assert all(x >= 0 and y >= 0 for e in drawing.entities for x, y in e.points)
+
+
+def test_strict_parse_preserves_the_same_absolute_coordinates():
+    drawing = parse_dxf_path(SAMPLES / "reference.dxf", normalize=False)
+    assert drawing.bbox == (0.0, -20.0, 100.0, 88.0)
+    assert drawing.normalization["mode"] == "strict"
+    assert drawing.normalization["translation"] == [0, 0]
 
 
 def test_preserves_scale():

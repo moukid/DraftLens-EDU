@@ -105,20 +105,28 @@ def _drawing(entities):
     bbox = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
     return Drawing(entities, tuple(round(x, 6) for x in bbox), normalization={"mode": "strict", "translation": [0, 0], "rotation_degrees": 0, "scale": 1})
 
-def parse_dxf_path(path, source="reference"):
-    return parse_dxf_bytes(Path(path).read_bytes(), source)
+def parse_dxf_path(path, source="reference", normalize=True):
+    return parse_dxf_bytes(Path(path).read_bytes(), source, normalize=normalize)
 
 def normalize_drawing(entities):
+    """Preserve absolute geometry while marking translation estimation as pending.
+
+    Translation-tolerant comparison requires both drawings, so it cannot be
+    performed safely while parsing one drawing in isolation. The comparison
+    layer estimates and applies one student-to-reference transform later.
+    """
     drawing = _drawing(entities)
-    x0, y0 = drawing.bbox[0], drawing.bbox[1]
-    for entity in entities:
-        entity.points = [(round(x-x0, 6), round(y-y0, 6)) for x, y in entity.points]
-        if entity.bbox:
-            a,b,c,d = entity.bbox
-            entity.bbox = (a-x0,b-y0,c-x0,d-y0)
-        if entity.centroid:
-            entity.centroid = (entity.centroid[0]-x0,entity.centroid[1]-y0)
-    return Drawing(entities, (0.0, 0.0, round(drawing.bbox[2]-x0, 6), round(drawing.bbox[3]-y0, 6)), normalization={"mode": "translation", "translation": [-x0, -y0], "rotation_degrees": 0, "scale": 1})
+    drawing.normalization = {
+        "mode": "translation",
+        "translation": [0.0, 0.0],
+        "rotation_degrees": 0,
+        "scale": 1,
+        "support_count": 0,
+        "support_ratio": 0.0,
+        "confidence": "none",
+        "rejection_reason": "pending_pairwise_transform_estimation",
+    }
+    return drawing
 
 def entity_length(entity):
     if entity.kind == "line" and len(entity.points) == 2:
