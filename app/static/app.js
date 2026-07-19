@@ -18,6 +18,8 @@ const referenceInput = byId("reference-file");
 const studentInput = byId("student-file");
 const fallbackInput = byId("fallback-mode");
 const completionPolicyInput = byId("completion-scoring-mode");
+const ruleBasedOption = completionPolicyInput.querySelector('option[value="rule_based"]');
+ruleBasedOption.textContent = "Rule-based completion";
 const approveButton = byId("approve-rubric");
 const reviewButton = byId("run-review");
 
@@ -290,7 +292,7 @@ function renderRubricEditor() {
 }
 
 function completionPolicyLabel(mode) {
-  return mode === "proportional" ? "Proportional completion" : "Rule-based deductions";
+  return mode === "proportional" ? "Proportional completion" : "Rule-based completion";
 }
 
 function completionPolicyDescription(mode) {

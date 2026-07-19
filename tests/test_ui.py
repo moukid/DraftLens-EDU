@@ -157,8 +157,9 @@ def test_completion_policy_and_applied_deduction_contract_are_visible():
     response, parser = page()
     assert parser.elements["completion-scoring-mode"][0] == "select"
     assert "Proportional completion" in response.text
-    assert "Rule-based deductions" in response.text
     javascript = client.get("/static/app.js").text
+    assert 'ruleBasedOption.textContent = "Rule-based completion"' in javascript
+    assert '? "Proportional completion" : "Rule-based completion"' in javascript
     assert "state.provisionalRubric.completion_scoring_mode" in javascript
     assert "completionPolicyDescription" in javascript
     assert "review.score_breakdown" in javascript

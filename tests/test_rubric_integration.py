@@ -45,11 +45,13 @@ def test_grading_uses_associated_approved_rubric_and_its_tolerances():
 
 def test_different_approved_weights_change_the_score():
     first = suggest()
+    first["rubric"]["completion_scoring_mode"] = "proportional"
     first_approval = approve(first)
     assert first_approval.status_code == 200
     first_score = grade().json()["score"]
 
     second = suggest()
+    second["rubric"]["completion_scoring_mode"] = "proportional"
     weights = {"geometry": 30, "completion": 60, "quality": 10}
     for category in second["rubric"]["categories"]:
         category["weight"] = weights[category["id"]]

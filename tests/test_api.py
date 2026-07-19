@@ -33,11 +33,11 @@ def test_rubric_suggestion_requires_approval_and_can_be_approved():
  assert suggestion.status_code==200
  body=suggestion.json()
  assert body["provisional"] is True and body["rubric"]["approved"] is False
- assert body["completion_scoring_mode"]==body["rubric"]["completion_scoring_mode"]=="proportional"
+ assert body["completion_scoring_mode"]==body["rubric"]["completion_scoring_mode"]=="rule_based"
  approved=client.post("/api/rubric/approve",json={"reference_id":body["reference_id"],"rubric":body["rubric"]})
  assert approved.status_code==200
  assert approved.json()["rubric"]["approved"] is True
- assert approved.json()["completion_scoring_mode"]=="proportional"
+ assert approved.json()["completion_scoring_mode"]=="rule_based"
 
 def test_reference_validation_rejects_invalid_dxf_cleanly():
  response=client.post("/api/reference/validate",files={"reference":("broken.dxf",b"not a dxf","application/dxf")})
@@ -123,8 +123,8 @@ def test_review_proportional_policy_suppresses_raw_missing_rule_and_reconciles_s
  assert breakdown["total_applied_deduction"]==pytest.approx(sum(category["deduction"] for category in breakdown["category_subtotals"]))
  assert breakdown["final_score"]==body["score"]
 
-def test_review_rule_based_policy_applies_missing_rule_without_completion_deduction():
- _,approval=_review_approve(reference_path=AUDIT_REFERENCE,completion_mode="rule_based")
+def test_review_default_suggested_rule_based_policy_applies_missing_rule_without_completion_deduction():
+ _,approval=_review_approve(reference_path=AUDIT_REFERENCE)
  body=_post_review(reference_path=AUDIT_REFERENCE,student_path=AUDIT_MISSING).json()
  assert approval["completion_scoring_mode"]=="rule_based"
  assert body["completion_scoring_mode"]=="rule_based"
