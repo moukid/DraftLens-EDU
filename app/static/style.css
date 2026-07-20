@@ -110,7 +110,7 @@ ul { padding-left: 18px; }
   padding-right: 2px;
 }
 
-.panel, .results-bar, .score-breakdown, .drawing-panel, .issues-panel, .feedback-panel, .review-placeholder {
+.panel, .results-bar, .score-breakdown, .normalization-card, .drawing-panel, .issues-panel, .feedback-panel, .review-placeholder {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
@@ -339,6 +339,25 @@ fieldset legend { padding: 0 4px; }
 .score-breakdown-total div:last-child { border-top: 1px solid var(--line-strong); padding-top: 6px; }
 .score-breakdown-total dd { color: var(--green); }
 
+.normalization-card {
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: minmax(180px, .55fr) minmax(320px, 1fr) minmax(320px, 1.25fr);
+  gap: 18px;
+  align-items: start;
+}
+.normalization-summary, .normalization-evidence-grid { margin: 0; display: grid; gap: 6px; }
+.normalization-summary div, .normalization-evidence-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+}
+.normalization-summary dd, .normalization-evidence-grid dd { text-align: right; font-weight: 700; }
+.normalization-card details { min-width: 0; }
+.normalization-card summary { cursor: pointer; color: var(--green); font-size: 11px; font-weight: 800; }
+.normalization-evidence-grid { margin-top: 8px; }
+.normalization-evidence-grid div + div { border-top: 1px solid var(--line); padding-top: 5px; }
 
 
 .drawing-panel { overflow: hidden; }
@@ -549,6 +568,7 @@ footer {
   .workspace { grid-template-columns: 330px minmax(0, 1fr); }
   .results-bar { grid-template-columns: 1fr; gap: 12px; }
   .score-breakdown { grid-template-columns: 1fr; gap: 12px; }
+  .normalization-card { grid-template-columns: 1fr; gap: 12px; }
   .drawing-viewport { min-height: 440px; height: 52vh; }
   .review-detail-grid { grid-template-columns: 1fr; }
 }

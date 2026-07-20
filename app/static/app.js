@@ -18,6 +18,7 @@ const referenceInput = byId("reference-file");
 const studentInput = byId("student-file");
 const fallbackInput = byId("fallback-mode");
 const completionPolicyInput = byId("completion-scoring-mode");
+const normalizationModeInput = byId("normalization-mode");
 const ruleBasedOption = completionPolicyInput.querySelector('option[value="rule_based"]');
 ruleBasedOption.textContent = "Rule-based completion";
 const approveButton = byId("approve-rubric");
@@ -32,6 +33,12 @@ completionPolicyInput.addEventListener("change", () => {
   if (!state.provisionalRubric) return;
   state.provisionalRubric.completion_scoring_mode = completionPolicyInput.value;
   renderCompletionPolicySummary(completionPolicyInput.value);
+  markRubricDirty();
+});
+normalizationModeInput.addEventListener("change", () => {
+  if (!state.provisionalRubric) return;
+  state.provisionalRubric.normalization_mode = normalizationModeInput.value;
+  renderNormalizationPolicySummary(normalizationModeInput.value);
   markRubricDirty();
 });
 byId("rubric-name").addEventListener("input", (event) => {
@@ -97,6 +104,7 @@ function setLoading(loading, message) {
   studentInput.disabled = loading;
   fallbackInput.disabled = loading || Boolean(state.rubricId);
   completionPolicyInput.disabled = loading || Boolean(state.rubricId);
+  normalizationModeInput.disabled = loading;
   reviewButton.textContent = loading && message === "review" ? "Generating review…" : "Generate visual review";
   approveButton.textContent = loading && message === "approval" ? "Approving…" : "Approve rubric";
   updateWeightTotal();
@@ -129,6 +137,7 @@ function hideError() {
 function resetReview() {
   state.review = null;
   state.filter = "all";
+  resetNormalizationDecision();
   resetIssueSelection("Select an issue in the list or drawing.");
   byId("review-results").hidden = true;
   byId("review-placeholder").hidden = false;
@@ -140,6 +149,22 @@ function resetReview() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+}
+
+function resetNormalizationDecision() {
+  [
+    "result-normalization-mode",
+    "result-transform",
+    "result-applied-translation",
+    "result-candidate-translation",
+    "result-transform-support",
+    "result-transform-ratio",
+    "result-transform-confidence",
+    "result-error-reduction",
+    "result-transform-reason",
+  ].forEach((id) => { byId(id).textContent = "—"; });
+  byId("normalization-evidence").hidden = true;
+  byId("result-transform-reason-row").hidden = true;
 }
 
 function resetIssueSelection(message) {
@@ -195,7 +220,9 @@ function resetReferenceDependentState() {
   fallbackInput.checked = false;
   fallbackInput.disabled = false;
   completionPolicyInput.disabled = false;
+  normalizationModeInput.disabled = false;
   byId("completion-policy-summary").textContent = "";
+  byId("normalization-policy-summary").textContent = "";
   byId("analysis-summary").hidden = true;
   byId("rubric-editor").hidden = true;
   byId("rubric-empty").hidden = false;
@@ -292,6 +319,9 @@ function renderRubricEditor() {
   byId("rubric-empty").hidden = true;
   byId("rubric-editor").hidden = false;
   byId("rubric-name").value = rubric.title || "";
+  normalizationModeInput.value = rubric.normalization_mode || "strict";
+  normalizationModeInput.disabled = state.loading;
+  renderNormalizationPolicySummary(normalizationModeInput.value);
   completionPolicyInput.value = rubric.completion_scoring_mode || "rule_based";
   completionPolicyInput.disabled = Boolean(state.rubricId);
   renderCompletionPolicySummary(completionPolicyInput.value);
@@ -334,6 +364,20 @@ function renderRubricEditor() {
   updateWeightTotal();
 }
 
+function placementModeLabel(mode) {
+  return mode === "translation" ? "Translation-tolerant placement" : "Strict placement";
+}
+
+function placementModeDescription(mode) {
+  return mode === "translation"
+    ? "A consistent whole-drawing translation may be accepted when robust entity consensus exists. Local movement remains an error."
+    : "Absolute coordinates matter. A shifted drawing receives position deductions.";
+}
+
+function renderNormalizationPolicySummary(mode) {
+  byId("normalization-policy-summary").textContent = placementModeDescription(mode);
+}
+
 function completionPolicyLabel(mode) {
   return mode === "proportional" ? "Proportional completion" : "Rule-based completion";
 }
@@ -368,6 +412,7 @@ function markRubricDirty() {
     state.rubricId = null;
     fallbackInput.disabled = false;
     completionPolicyInput.disabled = false;
+    normalizationModeInput.disabled = false;
   }
   if (state.provisionalRubric) state.provisionalRubric.approved = false;
   byId("rubric-status").textContent = "Changes require instructor approval.";
@@ -391,7 +436,8 @@ async function approveRubric() {
     fallbackInput.checked = false;
     fallbackInput.disabled = true;
     completionPolicyInput.disabled = true;
-    byId("rubric-status").textContent = "Approved and associated. Completion policy: " + completionPolicyLabel(state.provisionalRubric.completion_scoring_mode) + ".";
+    normalizationModeInput.disabled = false;
+    byId("rubric-status").textContent = "Approved and associated. Placement: " + placementModeLabel(state.provisionalRubric.normalization_mode) + ". Completion policy: " + completionPolicyLabel(state.provisionalRubric.completion_scoring_mode) + ".";
     setWorkflowStatus("Rubric approved — add student drawing", "success");
   } catch (error) {
     showError(error);
@@ -464,8 +510,10 @@ function renderResults(review) {
   byId("result-unsupported").textContent = String(counts.unsupported_entities ?? unsupported.length);
   const source = humanize(review.rubric_selection && review.rubric_selection.source);
   const completionMode = review.completion_scoring_mode || review.rubric.completion_scoring_mode || "rule_based";
-  byId("result-rubric").textContent = (review.rubric.title || "Applied rubric") + " · " + source + " · " + completionPolicyLabel(completionMode);
+  const normalizationMode = review.normalization_mode || review.rubric.normalization_mode || "strict";
+  byId("result-rubric").textContent = (review.rubric.title || "Applied rubric") + " · " + source + " · " + completionPolicyLabel(completionMode) + " · " + placementModeLabel(normalizationMode);
   renderScoreBreakdown(review, completionMode);
+  renderNormalizationDecision(review);
   const critical = review.issues.filter((issue) => isPrimaryStudentIssue(issue) && issue.severity === "critical").length;
   byId("critical-summary").textContent = critical ? critical + " critical student issue(s)" : "No critical student issues";
   renderSafeSvg(review.svg);
@@ -482,6 +530,41 @@ function renderResults(review) {
     resetIssueSelection(message);
   }
   byId("review-results").scrollIntoView();
+}
+
+function formatTranslation(vector) {
+  if (!Array.isArray(vector) || vector.length < 2) return "Not available";
+  return "X = " + Number(vector[0]).toFixed(3) + " · Y = " + Number(vector[1]).toFixed(3);
+}
+
+function renderNormalizationDecision(review) {
+  const mode = review.normalization_mode || (review.rubric && review.rubric.normalization_mode) || "strict";
+  const decision = review.normalization_decision || {};
+  byId("result-normalization-mode").textContent = placementModeLabel(mode);
+  if (mode === "strict") {
+    byId("result-transform").textContent = "None permitted";
+    byId("normalization-evidence").hidden = true;
+    byId("result-transform-reason-row").hidden = true;
+    return;
+  }
+
+  byId("normalization-evidence").hidden = false;
+  byId("result-transform").textContent = decision.transform_applied ? "Applied translation" : "None";
+  byId("result-applied-translation").textContent = decision.transform_applied
+    ? formatTranslation(decision.selected_translation)
+    : "None";
+  byId("result-candidate-translation").textContent = formatTranslation(decision.candidate_translation);
+  byId("result-transform-support").textContent = String(decision.support_count || 0) + " of " + String(decision.evidence_count || 0) + " compatible entities";
+  byId("result-transform-ratio").textContent = formatNumber(Number(decision.support_ratio || 0) * 100) + "%";
+  byId("result-transform-confidence").textContent = humanize(decision.confidence);
+  const reduction = decision.total_error_reduction;
+  const reductionRatio = decision.error_reduction_ratio;
+  byId("result-error-reduction").textContent = reduction === null || reduction === undefined
+    ? "Not applicable"
+    : formatNumber(reduction) + " (" + formatNumber(Number(reductionRatio || 0) * 100) + "%)";
+  const reason = decision.rejection_reason || "";
+  byId("result-transform-reason-row").hidden = decision.transform_applied || !reason;
+  byId("result-transform-reason").textContent = reason ? humanize(reason) : "—";
 }
 
 function findingRole(issue) {

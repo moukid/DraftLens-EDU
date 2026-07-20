@@ -47,6 +47,13 @@ def test_visual_review_page_exposes_complete_semantic_workflow():
         "rubric-categories",
         "completion-scoring-mode",
         "completion-policy-summary",
+        "normalization-mode",
+        "normalization-policy-summary",
+        "normalization-card",
+        "result-normalization-mode",
+        "result-transform",
+        "normalization-evidence",
+        "result-transform-reason",
         "score-breakdown-categories",
         "result-policy",
         "result-applied-deduction",
@@ -177,6 +184,35 @@ def test_review_state_reset_and_finding_roles_are_explicitly_wired():
     assert ".issue-card.finding-supporting" in stylesheet
     assert ".issue-card.finding-reference" in stylesheet
     assert "hidden" in parser.elements["feedback-detail"][1]
+
+def test_normalization_selector_invalidates_approval_and_result_evidence_is_visible():
+    response, parser = page()
+    javascript = client.get("/static/app.js").text
+    stylesheet = client.get("/static/style.css").text
+
+    assert parser.elements["normalization-mode"][0] == "select"
+    assert "Strict placement" in response.text
+    assert "Translation-tolerant placement" in response.text
+    assert "Absolute coordinates matter" in javascript
+    assert "Local movement remains an error" in javascript
+    listener = javascript[
+        javascript.index('normalizationModeInput.addEventListener("change"'):
+        javascript.index('byId("rubric-name").addEventListener')
+    ]
+    assert "state.provisionalRubric.normalization_mode = normalizationModeInput.value" in listener
+    assert "markRubricDirty();" in listener
+    dirty = javascript[javascript.index("function markRubricDirty"):javascript.index("async function approveRubric")]
+    assert "state.rubricId = null" in dirty
+    assert "normalizationModeInput.disabled = false" in dirty
+    assert "normalizationModeInput.disabled = loading;" in javascript
+    assert "normalizationModeInput.disabled = false" in javascript
+    assert "placementModeLabel(state.provisionalRubric.normalization_mode)" in javascript
+    assert "renderNormalizationDecision(review)" in javascript
+    assert 'byId("result-transform").textContent = "None permitted"' in javascript
+    assert "decision.rejection_reason" in javascript
+    assert "resetNormalizationDecision();" in javascript
+    assert ".normalization-card" in stylesheet
+
 
 def test_completion_policy_and_applied_deduction_contract_are_visible():
     response, parser = page()

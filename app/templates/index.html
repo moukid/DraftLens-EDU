@@ -45,6 +45,16 @@
           <label class="field">Rubric name<input id="rubric-name" type="text" maxlength="160"></label>
           <div class="section-label"><span>Category weights</span><strong id="weight-total">0%</strong></div>
           <div id="rubric-categories" class="rubric-categories"></div>
+          <fieldset id="placement-policy" class="policy-fieldset">
+            <legend>Placement policy</legend>
+            <label class="field" for="normalization-mode">How student drawing origin is treated
+              <select id="normalization-mode">
+                <option value="strict">Strict placement</option>
+                <option value="translation">Translation-tolerant placement</option>
+              </select>
+            </label>
+            <p id="normalization-policy-summary" class="policy-summary"></p>
+          </fieldset>
           <fieldset class="policy-fieldset">
             <legend>Completion scoring policy</legend>
             <label class="field" for="completion-scoring-mode">How incomplete work is scored
@@ -118,6 +128,29 @@
             <div><dt>Total applied deduction</dt><dd id="result-applied-deduction">—</dd></div>
             <div><dt>Final score</dt><dd id="result-final-score">—</dd></div>
           </dl>
+        </section>
+
+        <section id="normalization-card" class="normalization-card" aria-labelledby="normalization-heading">
+          <div>
+            <p class="eyebrow">Placement decision</p>
+            <h2 id="normalization-heading">Normalization</h2>
+          </div>
+          <dl class="normalization-summary">
+            <div><dt>Normalization</dt><dd id="result-normalization-mode">—</dd></div>
+            <div><dt>Transform</dt><dd id="result-transform">—</dd></div>
+          </dl>
+          <details id="normalization-evidence">
+            <summary>Transform evidence</summary>
+            <dl class="normalization-evidence-grid">
+              <div><dt>Applied translation</dt><dd id="result-applied-translation">—</dd></div>
+              <div><dt>Candidate translation</dt><dd id="result-candidate-translation">—</dd></div>
+              <div><dt>Support</dt><dd id="result-transform-support">—</dd></div>
+              <div><dt>Support ratio</dt><dd id="result-transform-ratio">—</dd></div>
+              <div><dt>Confidence</dt><dd id="result-transform-confidence">—</dd></div>
+              <div><dt>Total-error reduction</dt><dd id="result-error-reduction">—</dd></div>
+              <div id="result-transform-reason-row"><dt>Reason</dt><dd id="result-transform-reason">—</dd></div>
+            </dl>
+          </details>
         </section>
 
         <section class="drawing-panel" aria-labelledby="drawing-heading">

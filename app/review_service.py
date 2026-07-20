@@ -160,6 +160,52 @@ def _finding_counts(
     }
 
 
+def normalization_decision(output: GradingPipelineOutput) -> dict[str, Any]:
+    """Expose the recorded normalization decision without changing its calculation."""
+
+    requested_mode = output.rubric.normalization_mode
+    record = output.comparison["normalization"]["student"]
+    if requested_mode == "strict":
+        return {
+            "requested_mode": "strict",
+            "applied_mode": "strict",
+            "transform_applied": False,
+            "selected_translation": [0.0, 0.0],
+            "candidate_translation": None,
+            "support_count": 0,
+            "evidence_count": 0,
+            "support_ratio": 0.0,
+            "confidence": "not_applicable",
+            "error_before": None,
+            "error_after": None,
+            "total_error_reduction": None,
+            "error_reduction_ratio": None,
+            "rejection_reason": None,
+        }
+
+    selected = list(record.get("translation") or [0.0, 0.0])
+    error_before = float(record.get("error_before") or 0.0)
+    error_after = float(record.get("error_after") or 0.0)
+    return {
+        "requested_mode": requested_mode,
+        "applied_mode": str(record.get("mode") or requested_mode),
+        "transform_applied": any(abs(float(value)) > 1e-9 for value in selected),
+        "selected_translation": selected,
+        "candidate_translation": list(
+            record.get("candidate_translation") or [0.0, 0.0]
+        ),
+        "support_count": int(record.get("support_count") or 0),
+        "evidence_count": int(record.get("evidence_count") or 0),
+        "support_ratio": float(record.get("support_ratio") or 0.0),
+        "confidence": str(record.get("confidence") or "none"),
+        "error_before": error_before,
+        "error_after": error_after,
+        "total_error_reduction": round(max(0.0, error_before - error_after), 6),
+        "error_reduction_ratio": float(record.get("error_reduction_ratio") or 0.0),
+        "rejection_reason": record.get("rejection_reason"),
+    }
+
+
 def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
     """Build the stable JSON/SVG contract after successful deterministic grading."""
 
@@ -177,6 +223,8 @@ def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
         "rubric_selection": output.rubric_selection,
         "rubric": output.rubric.model_dump(),
         "completion_scoring_mode": output.rubric.completion_scoring_mode,
+        "normalization_mode": output.rubric.normalization_mode,
+        "normalization_decision": normalization_decision(output),
         "units": reviewed.units,
         "extents": list(reviewed.extents),
         "issues": issues,

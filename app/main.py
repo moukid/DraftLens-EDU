@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .analysis import analyze_assignment
 from .dxf import DXFParseError,parse_dxf_bytes
 from .feedback import generate_feedback
-from .review_service import PipelineContractError, build_review_response, reference_fingerprint, run_grading_pipeline
+from .review_service import PipelineContractError, build_review_response, normalization_decision, reference_fingerprint, run_grading_pipeline
 from .rubric import Rubric, default_rubric
 from .validator import validate_reference
 ROOT=Path(__file__).parent; templates=Environment(loader=FileSystemLoader(ROOT/"templates"),autoescape=select_autoescape())
@@ -99,6 +99,8 @@ async def grade(
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
         "rubric": output.rubric.model_dump(),
+        "normalization_mode": output.rubric.normalization_mode,
+        "normalization_decision": normalization_decision(output),
     })
     return result
 
@@ -135,11 +137,14 @@ async def assignment_analyze(reference: UploadFile = File(...)):
 async def rubric_suggest(reference: UploadFile = File(...)):
     reference_bytes = await read_upload(reference)
     drawing = parse_dxf_bytes(reference_bytes, source="reference")
-    suggested_rubric = default_rubric(reference.filename or "Assignment rubric")
+    suggested_rubric = default_rubric(reference.filename or "Assignment rubric").model_copy(
+        update={"normalization_mode": "strict"}
+    )
     return {
         "reference_id": reference_fingerprint(reference_bytes),
         "analysis": analyze_assignment(drawing),
         "completion_scoring_mode": suggested_rubric.completion_scoring_mode,
+        "normalization_mode": suggested_rubric.normalization_mode,
         "rubric": suggested_rubric.model_dump(),
         "provisional": True,
         "requires_instructor_approval": True,
@@ -156,6 +161,7 @@ def rubric_approve(request: RubricApprovalRequest):
         "rubric_id": rubric_id,
         "reference_id": request.reference_id,
         "completion_scoring_mode": approved.completion_scoring_mode,
+        "normalization_mode": approved.normalization_mode,
         "rubric": approved.model_dump(),
     }
 @app.post("/api/report",response_class=HTMLResponse)
