@@ -8,6 +8,7 @@ from app.main import RUBRIC_REFERENCES, RUBRICS, app
 from app.rubric import default_rubric
 S=Path(__file__).parents[1]/"samples"; client=TestClient(app)
 A=Path(__file__).parent/"fixtures"/"simple_audit"
+AUDIT_II=Path(__file__).parent/"fixtures"/"simple_audit-II"
 AUDIT_REFERENCE=A/"00_reference_000-Simple.dxf"
 AUDIT_MISSING=A/"02_missing_line_73B.dxf"
 def test_health(): assert client.get('/health').json()=={"status":"ok"}
@@ -67,9 +68,9 @@ def _post_grade(student_path=S/"student_missing_wall.dxf",reference_path=S/"refe
    "student":("student.dxf",student,"application/dxf"),
   })
 
-def _document_bytes(*,text=None,unsupported=False):
+def _document_bytes(*,text=None,unsupported=False,units=ezdxf.units.MM):
  document=ezdxf.new("R2010")
- document.units=ezdxf.units.MM
+ document.units=units
  modelspace=document.modelspace()
  modelspace.add_line((0,0),(10,0))
  if text is not None:
@@ -104,7 +105,64 @@ def test_review_uses_associated_approved_rubric_and_returns_stable_contract():
  assert body["issues"] and body["technical_feedback"]
  assert body["svg"].startswith("<svg ")
  for finding in body["issues"]:
-  assert {"issue_id","visual_role","css_classes","technical_feedback","deduction","raw_deduction","applied_deduction","deduction_status","suppression_reason","rubric_rule_id","confidence"}<=finding.keys()
+  assert {"issue_id","visual_role","css_classes","finding_role","technical_feedback","deduction","raw_deduction","applied_deduction","deduction_status","suppression_reason","rubric_rule_id","confidence"}<=finding.keys()
+
+@pytest.mark.parametrize(
+ ("reference_name", "student_name"),
+ (
+  ("02-SQUARE-Reference.dxf", "02-SQUARE-Student-OK.dxf"),
+  ("03-T-Junction-Reference.dxf", "03-T-Junction-Student-OK.dxf"),
+  ("04-T-Crossing-Reference.dxf", "04-T-Crossing-Student-OK.dxf"),
+ ),
+)
+def test_exact_manual_acceptance_reviews_have_no_student_or_supporting_findings(reference_name,student_name):
+ body=_post_review(
+  reference_path=AUDIT_II/reference_name,
+  student_path=AUDIT_II/student_name,
+  data={"allow_fallback":"true"},
+ ).json()
+ assert body["score"]==100
+ assert body["student_issue_count"]==0
+ assert body["supporting_finding_count"]==0
+ assert body["reference_note_count"]==0
+ assert body["issues"]==[]
+
+
+def test_displaced_square_separates_primary_and_supporting_findings():
+ body=_post_review(
+  reference_path=AUDIT_II/"02-SQUARE-Reference.dxf",
+  student_path=AUDIT_II/"02-SQUARE-Gap-3Unit.dxf",
+  data={"allow_fallback":"true"},
+ ).json()
+ assert body["score"]==97
+ assert body["finding_counts"]=={
+  "primary_student_issues":1,
+  "supporting_findings":2,
+  "reference_validation_notes":0,
+  "unsupported_entities":0,
+ }
+ primary=[finding for finding in body["issues"] if finding["finding_role"]=="primary"]
+ supporting=[finding for finding in body["issues"] if finding["finding_role"]=="supporting"]
+ assert [finding["category"] for finding in primary]==["incorrect_position"]
+ assert [finding["category"] for finding in supporting]==["endpoint_gap","endpoint_gap"]
+ assert all(finding["applied_deduction"]==0 for finding in supporting)
+
+
+def test_reference_validation_notes_are_counted_separately():
+ unitless=_document_bytes(units=0)
+ response=client.post("/api/review",data={"allow_fallback":"true"},files={
+  "reference":("reference.dxf",unitless,"application/dxf"),
+  "student":("student.dxf",unitless,"application/dxf"),
+ })
+ assert response.status_code==200
+ body=response.json()
+ assert body["student_issue_count"]==0
+ assert body["supporting_finding_count"]==0
+ assert body["reference_note_count"]==1
+ note=next(finding for finding in body["issues"] if finding["finding_role"]=="reference")
+ assert note["category"]=="reference_warning"
+ assert note["provenance"]=="reference_validation"
+ assert "insertion units" in note["technical_feedback"]
 
 def test_review_proportional_policy_suppresses_raw_missing_rule_and_reconciles_score():
  _,approval=_review_approve(reference_path=AUDIT_REFERENCE,completion_mode="proportional")

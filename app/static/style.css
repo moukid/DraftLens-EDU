@@ -316,7 +316,7 @@ fieldset legend { padding: 0 4px; }
   letter-spacing: .09em;
   text-transform: uppercase;
 }
-.result-metrics { grid-template-columns: 1.4fr repeat(3, 1fr); margin: 0; }
+.result-metrics { grid-template-columns: 1.4fr repeat(5, 1fr); margin: 0; }
 .result-metrics > div { padding: 8px 9px; }
 .score-metric { border-color: #a7ceb8 !important; background: var(--green-soft) !important; }
 .score-metric dd { display: flex; align-items: baseline; gap: 3px; }
@@ -456,6 +456,17 @@ fieldset legend { padding: 0 4px; }
 .issue-card.role-connectivity { border-left-color: var(--magenta); }
 .issue-card.role-warning { border-left-color: var(--yellow); }
 .issue-card.role-critical { border-left-color: var(--red); background: #fff9f8; }
+.issue-card.finding-supporting {
+  border-style: dashed;
+  border-left: 4px solid var(--magenta);
+  background: #fcf7fa;
+}
+.issue-card.finding-reference {
+  border-left-color: var(--line-strong);
+  background: var(--surface-muted);
+}
+.issue-card.finding-supporting .issue-card-deduction,
+.issue-card.finding-reference .issue-card-deduction { color: var(--muted); }
 .issue-card-top { display: flex; justify-content: space-between; gap: 12px; }
 .issue-card-top strong { font-size: 12px; }
 .issue-card-top > span { color: var(--muted); font-family: ui-monospace, "Cascadia Code", monospace; font-size: 10px; }

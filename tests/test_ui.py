@@ -58,6 +58,9 @@ def test_visual_review_page_exposes_complete_semantic_workflow():
         "run-review",
         "review-results",
         "result-score",
+        "result-issues",
+        "result-supporting",
+        "result-reference-notes",
         "drawing-viewport",
         "issue-list",
         "feedback-detail",
@@ -152,6 +155,28 @@ def test_issue_filters_and_bidirectional_issue_selection_are_wired():
     assert 'querySelectorAll("#drawing-viewport [data-issue-id]")' in javascript
     assert 'element.getAttribute("data-issue-id") === issueId' in javascript
 
+
+def test_review_state_reset_and_finding_roles_are_explicitly_wired():
+    response, parser = page()
+    javascript = client.get("/static/app.js").text
+    stylesheet = client.get("/static/style.css").text
+    run_review = javascript[javascript.index("async function runReview"):javascript.index("function renderResults")]
+
+    assert run_review.index("resetReview();") < run_review.index('requestJson("/api/review"')
+    assert "state.selectedIssueId = null" in javascript
+    assert 'element.classList.remove("is-selected")' in javascript
+    assert 'byId("feedback-detail").hidden = true' in javascript
+    assert 'clearChildren(byId("command-list"))' in javascript
+    assert "review.issues.find(isPrimaryStudentIssue)" in javascript
+    assert "No student issues detected" in javascript
+    assert "Supporting topology evidence" in javascript
+    assert "No separate deduction" in javascript
+    assert "Primary issues" in response.text
+    assert "Supporting" in response.text
+    assert "Reference notes" in response.text
+    assert ".issue-card.finding-supporting" in stylesheet
+    assert ".issue-card.finding-reference" in stylesheet
+    assert "hidden" in parser.elements["feedback-detail"][1]
 
 def test_completion_policy_and_applied_deduction_contract_are_visible():
     response, parser = page()

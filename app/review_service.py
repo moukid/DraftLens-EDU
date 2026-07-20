@@ -121,8 +121,43 @@ def _issue_payload(reviewed: ReviewedDrawing) -> list[dict[str, Any]]:
     for issue in reviewed.issues:
         payload = issue.to_dict()
         payload["css_classes"] = list(VISUAL_ROLE_CLASSES[issue.visual_role])
+        payload["finding_role"] = _finding_role(payload)
         issues.append(payload)
     return issues
+
+
+def _finding_role(issue: Mapping[str, Any]) -> str:
+    if issue.get("category") == "unsupported_entity":
+        return "unsupported"
+    if issue.get("provenance") == "reference_validation":
+        return "reference"
+    if issue.get("provenance") == "comparison" and issue.get("classification") == "primary":
+        return "primary"
+    if issue.get("provenance") == "comparison" and issue.get("classification") in {
+        "supporting_evidence",
+        "derived",
+        "suppressed",
+    }:
+        return "supporting"
+    return "informational"
+
+
+def _finding_counts(
+    issues: list[dict[str, Any]], reviewed: ReviewedDrawing
+) -> dict[str, int]:
+    return {
+        "primary_student_issues": sum(
+            issue["finding_role"] == "primary" for issue in issues
+        ),
+        "supporting_findings": sum(
+            issue["finding_role"] == "supporting" for issue in issues
+        ),
+        "reference_validation_notes": sum(
+            issue["finding_role"] == "reference" for issue in issues
+        ),
+        "unsupported_entities": len(reviewed.reference_unsupported)
+        + len(reviewed.student_unsupported),
+    }
 
 
 def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
@@ -135,6 +170,7 @@ def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
         output.validation,
     )
     issues = _issue_payload(reviewed)
+    finding_counts = _finding_counts(issues, reviewed)
     return {
         "score": output.comparison["score"],
         "reference_id": output.reference_id,
@@ -144,6 +180,11 @@ def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
         "units": reviewed.units,
         "extents": list(reviewed.extents),
         "issues": issues,
+        "finding_counts": finding_counts,
+        "student_issue_count": finding_counts["primary_student_issues"],
+        "supporting_finding_count": finding_counts["supporting_findings"],
+        "reference_note_count": finding_counts["reference_validation_notes"],
+        "unsupported_entity_count": finding_counts["unsupported_entities"],
         "score_breakdown": output.comparison["score_breakdown"],
         "unsupported_entities": {
             "reference": reviewed.reference_unsupported,

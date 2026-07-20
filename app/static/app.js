@@ -128,12 +128,13 @@ function hideError() {
 
 function resetReview() {
   state.review = null;
-  state.selectedIssueId = null;
   state.filter = "all";
+  resetIssueSelection("Select an issue in the list or drawing.");
   byId("review-results").hidden = true;
   byId("review-placeholder").hidden = false;
   clearChildren(byId("drawing-viewport"));
   clearChildren(byId("issue-list"));
+  byId("issue-empty").hidden = true;
   document.querySelectorAll("[data-filter]").forEach((button) => {
     const active = button.dataset.filter === "all";
     button.classList.toggle("active", active);
@@ -141,6 +142,33 @@ function resetReview() {
   });
 }
 
+function resetIssueSelection(message) {
+  state.selectedIssueId = null;
+  document.querySelectorAll("#drawing-viewport [data-issue-id]").forEach((element) => {
+    element.classList.remove("is-selected");
+  });
+  const empty = byId("feedback-empty");
+  empty.textContent = message || "Select an issue in the list or drawing.";
+  empty.hidden = false;
+  byId("feedback-detail").hidden = true;
+  byId("feedback-severity").textContent = "—";
+  byId("feedback-severity").className = "severity-chip";
+  [
+    "feedback-id",
+    "feedback-category",
+    "feedback-text",
+    "evidence-expected",
+    "evidence-actual",
+    "evidence-measurement",
+    "evidence-rule",
+    "evidence-deduction",
+    "evidence-raw-deduction",
+    "evidence-deduction-status",
+    "evidence-confidence",
+  ].forEach((id) => { byId(id).textContent = "—"; });
+  clearChildren(byId("command-list"));
+  byId("feedback-commands").hidden = true;
+}
 function resetReferenceDependentState() {
   state.referenceId = null;
   state.referenceCanContinue = false;
@@ -384,6 +412,7 @@ function updateReviewAvailability() {
 async function runReview() {
   if (!canRunReview()) return;
   hideError();
+  resetReview();
   setLoading(true, "review");
   setWorkflowStatus("Generating deterministic review", "working");
   const form = new FormData();
@@ -409,24 +438,60 @@ function renderResults(review) {
   byId("review-results").hidden = false;
   byId("result-score").textContent = formatNumber(review.score);
   byId("result-units").textContent = review.units || "unitless";
-  byId("result-issues").textContent = String(review.issues.length);
+  const counts = findingCounts(review);
+  byId("result-issues").textContent = String(counts.primary_student_issues);
+  byId("result-supporting").textContent = String(counts.supporting_findings);
+  byId("result-reference-notes").textContent = String(counts.reference_validation_notes);
   const unsupported = [
     ...((review.unsupported_entities && review.unsupported_entities.reference) || []),
     ...((review.unsupported_entities && review.unsupported_entities.student) || []),
   ];
-  byId("result-unsupported").textContent = String(unsupported.length);
+  byId("result-unsupported").textContent = String(counts.unsupported_entities ?? unsupported.length);
   const source = humanize(review.rubric_selection && review.rubric_selection.source);
   const completionMode = review.completion_scoring_mode || review.rubric.completion_scoring_mode || "rule_based";
   byId("result-rubric").textContent = (review.rubric.title || "Applied rubric") + " · " + source + " · " + completionPolicyLabel(completionMode);
   renderScoreBreakdown(review, completionMode);
-  const critical = review.issues.filter((issue) => issue.severity === "critical").length;
-  byId("critical-summary").textContent = critical ? critical + " critical issue(s)" : "No critical issues";
+  const critical = review.issues.filter((issue) => isPrimaryStudentIssue(issue) && issue.severity === "critical").length;
+  byId("critical-summary").textContent = critical ? critical + " critical student issue(s)" : "No critical student issues";
   renderSafeSvg(review.svg);
   state.filter = "all";
-  state.selectedIssueId = null;
+  resetIssueSelection();
   setFilter("all");
-  if (review.issues.length) selectIssue(review.issues[0].issue_id, false);
+  const firstPrimary = review.issues.find(isPrimaryStudentIssue);
+  if (firstPrimary) {
+    selectIssue(firstPrimary.issue_id, false);
+  } else {
+    const message = review.issues.length
+      ? "No primary student issues. Supporting and reference findings are listed separately."
+      : "No student issues detected. The drawing matches the approved reference.";
+    resetIssueSelection(message);
+  }
   byId("review-results").scrollIntoView();
+}
+
+function findingRole(issue) {
+  if (issue.finding_role) return issue.finding_role;
+  if (issue.category === "unsupported_entity") return "unsupported";
+  if (issue.provenance === "reference_validation") return "reference";
+  if (issue.provenance === "comparison" && issue.classification === "primary") return "primary";
+  if (issue.provenance === "comparison" && ["supporting_evidence", "derived", "suppressed"].includes(issue.classification)) return "supporting";
+  return "informational";
+}
+
+function isPrimaryStudentIssue(issue) {
+  return findingRole(issue) === "primary";
+}
+
+function findingCounts(review) {
+  if (review.finding_counts) return review.finding_counts;
+  const issues = review.issues || [];
+  const unsupported = review.unsupported_entities || {};
+  return {
+    primary_student_issues: issues.filter((issue) => findingRole(issue) === "primary").length,
+    supporting_findings: issues.filter((issue) => findingRole(issue) === "supporting").length,
+    reference_validation_notes: issues.filter((issue) => findingRole(issue) === "reference").length,
+    unsupported_entities: (unsupported.reference || []).length + (unsupported.student || []).length,
+  };
 }
 function renderScoreBreakdown(review, completionMode) {
   const breakdown = review.score_breakdown || {};
@@ -523,7 +588,8 @@ function renderIssueList() {
   visible.forEach((issue) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "issue-card role-" + safeClass(issue.visual_role);
+    const role = findingRole(issue);
+    button.className = "issue-card role-" + safeClass(issue.visual_role) + " finding-" + safeClass(role);
     button.dataset.issueId = issue.issue_id;
     button.setAttribute("aria-pressed", String(issue.issue_id === state.selectedIssueId));
     if (issue.issue_id === state.selectedIssueId) button.classList.add("is-selected");
@@ -531,7 +597,11 @@ function renderIssueList() {
     const top = document.createElement("span");
     top.className = "issue-card-top";
     const category = document.createElement("strong");
-    category.textContent = humanize(issue.category);
+    category.textContent = role === "supporting"
+      ? "Supporting topology evidence"
+      : role === "reference"
+        ? "Reference validation note"
+        : humanize(issue.category);
     const identity = document.createElement("span");
     identity.textContent = issue.issue_id;
     top.append(category, identity);
@@ -541,10 +611,14 @@ function renderIssueList() {
     feedback.textContent = issue.technical_feedback;
     const evidence = document.createElement("span");
     evidence.className = "issue-card-evidence";
-    evidence.textContent = humanize(issue.severity) + " · Applied: " + formatDeduction(appliedDeduction(issue));
+    evidence.textContent = role === "supporting"
+      ? humanize(issue.severity) + " · Supporting finding"
+      : role === "reference"
+        ? humanize(issue.severity) + " · Reference validation"
+        : humanize(issue.severity) + " · Applied: " + formatDeduction(appliedDeduction(issue));
     const deductionDetail = document.createElement("span");
     deductionDetail.className = "issue-card-deduction";
-    deductionDetail.textContent = formatDeductionDetail(issue);
+    deductionDetail.textContent = role === "supporting" ? "No separate deduction" : formatDeductionDetail(issue);
     button.append(top, feedback, evidence, deductionDetail);
     button.addEventListener("click", () => selectIssue(issue.issue_id, true));
     list.append(button);

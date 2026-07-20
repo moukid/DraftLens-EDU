@@ -99,14 +99,12 @@ def test_reviewed_exact_copy_has_no_false_reference_connectivity_note(audit_outp
     assert review["issues"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_exact_copy_review_contract_separates_student_issue_count(audit_outputs):
     review = build_review_response(audit_outputs[EXACT])
     assert review["student_issue_count"] == 0
-    assert review["reference_note_count"] == 1
+    assert review["supporting_finding_count"] == 0
+    assert review["reference_note_count"] == 0
+    assert review["unsupported_entity_count"] == 0
 
 
 def test_intentional_standalone_reference_lines_are_not_connectivity_warnings(
