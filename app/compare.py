@@ -94,6 +94,123 @@ def _exact_entity_pairs(reference: Drawing, student: Drawing) -> list[tuple[Enti
     return pairs
 
 
+def _assignment_entity_key(entity: Entity) -> tuple[str, str]:
+    return (repr(_geometry_signature(entity, relative=False)), entity.id)
+
+
+def _rectangular_assignment(costs: list[list[float]]) -> list[tuple[int, int]]:
+    """Return a deterministic minimum-cost assignment for rows <= columns."""
+
+    row_count = len(costs)
+    column_count = len(costs[0]) if costs else 0
+    if row_count == 0 or column_count == 0:
+        return []
+    if row_count > column_count or any(len(row) != column_count for row in costs):
+        raise ValueError("assignment matrix must be rectangular with rows <= columns")
+
+    row_potential = [0.0] * (row_count + 1)
+    column_potential = [0.0] * (column_count + 1)
+    matched_row = [0] * (column_count + 1)
+    previous_column = [0] * (column_count + 1)
+    epsilon = 1e-12
+
+    for row in range(1, row_count + 1):
+        matched_row[0] = row
+        minimum = [math.inf] * (column_count + 1)
+        used = [False] * (column_count + 1)
+        column = 0
+        while True:
+            used[column] = True
+            current_row = matched_row[column]
+            delta = math.inf
+            next_column = 0
+            for candidate_column in range(1, column_count + 1):
+                if used[candidate_column]:
+                    continue
+                reduced = (
+                    costs[current_row - 1][candidate_column - 1]
+                    - row_potential[current_row]
+                    - column_potential[candidate_column]
+                )
+                if reduced < minimum[candidate_column] - epsilon:
+                    minimum[candidate_column] = reduced
+                    previous_column[candidate_column] = column
+                if minimum[candidate_column] < delta - epsilon:
+                    delta = minimum[candidate_column]
+                    next_column = candidate_column
+            for candidate_column in range(column_count + 1):
+                if used[candidate_column]:
+                    row_potential[matched_row[candidate_column]] += delta
+                    column_potential[candidate_column] -= delta
+                else:
+                    minimum[candidate_column] -= delta
+            column = next_column
+            if matched_row[column] == 0:
+                break
+        while True:
+            prior = previous_column[column]
+            matched_row[column] = matched_row[prior]
+            column = prior
+            if column == 0:
+                break
+
+    assignment = [
+        (matched_row[column] - 1, column - 1)
+        for column in range(1, column_count + 1)
+        if matched_row[column]
+    ]
+    return sorted(assignment)
+
+
+def _minimum_cost_pairs(
+    reference_entities: list[Entity], student_entities: list[Entity]
+) -> list[tuple[Entity, Entity]]:
+    references = sorted(reference_entities, key=_assignment_entity_key)
+    students = sorted(student_entities, key=_assignment_entity_key)
+    if not references or not students:
+        return []
+    if len(references) <= len(students):
+        costs = [
+            [_candidate_cost(reference, student) for student in students]
+            for reference in references
+        ]
+        pairs = [
+            (references[reference_index], students[student_index])
+            for reference_index, student_index in _rectangular_assignment(costs)
+        ]
+    else:
+        costs = [
+            [_candidate_cost(reference, student) for reference in references]
+            for student in students
+        ]
+        pairs = [
+            (references[reference_index], students[student_index])
+            for student_index, reference_index in _rectangular_assignment(costs)
+        ]
+    return sorted(
+        pairs,
+        key=lambda pair: (
+            _assignment_entity_key(pair[0]),
+            _assignment_entity_key(pair[1]),
+        ),
+    )
+
+
+def _intrinsic_entity_pairs(
+    reference_entities: list[Entity], student_entities: list[Entity]
+) -> list[tuple[Entity, Entity]]:
+    reference_groups = _group_by_signature(reference_entities, relative=True)
+    student_groups = _group_by_signature(student_entities, relative=True)
+    pairs: list[tuple[Entity, Entity]] = []
+    for signature in sorted(reference_groups, key=repr):
+        pairs.extend(
+            _minimum_cost_pairs(
+                reference_groups[signature], student_groups.get(signature, [])
+            )
+        )
+    return pairs
+
+
 def _translation_evidence(
     reference: Drawing, student: Drawing
 ) -> tuple[list[tuple[Entity, Entity]], list[tuple[Entity, Entity]]]:
@@ -106,14 +223,7 @@ def _translation_evidence(
     student_remaining = [
         entity for entity in student.entities if entity.id not in exact_student_ids
     ]
-    reference_groups = _group_by_signature(reference_remaining, relative=True)
-    student_groups = _group_by_signature(student_remaining, relative=True)
-    intrinsic_pairs = []
-    for signature in sorted(reference_groups, key=repr):
-        reference_group = reference_groups[signature]
-        student_group = student_groups.get(signature, [])
-        if len(reference_group) == 1 and len(student_group) == 1:
-            intrinsic_pairs.append((reference_group[0], student_group[0]))
+    intrinsic_pairs = _intrinsic_entity_pairs(reference_remaining, student_remaining)
     return exact_pairs + intrinsic_pairs, exact_pairs
 
 
@@ -343,6 +453,21 @@ def _match_entities(reference: Drawing, student: Drawing, tolerance: TolerancePr
         (reference_entity, student_entity, 1.0)
         for reference_entity, student_entity in exact_pairs
     ]
+    extent = max(
+        reference.bbox[2] - reference.bbox[0],
+        reference.bbox[3] - reference.bbox[1],
+        1,
+    )
+    intrinsic_pairs = _intrinsic_entity_pairs(
+        [entity for entity in reference.entities if entity.id not in used_r],
+        [entity for entity in student.entities if entity.id not in used_s],
+    )
+    for reference_entity, student_entity in intrinsic_pairs:
+        used_r.add(reference_entity.id)
+        used_s.add(student_entity.id)
+        cost = _candidate_cost(reference_entity, student_entity)
+        confidence = max(0.0, min(1.0, 1 - cost / (extent + 1)))
+        matched.append((reference_entity, student_entity, confidence))
     pairs = sorted(
         (
             (
@@ -359,11 +484,6 @@ def _match_entities(reference: Drawing, student: Drawing, tolerance: TolerancePr
             and _compatible(reference_entity, student_entity)
         ),
         key=lambda item: (item[0], repr(item[1]), repr(item[2]), item[3].id, item[4].id),
-    )
-    extent = max(
-        reference.bbox[2] - reference.bbox[0],
-        reference.bbox[3] - reference.bbox[1],
-        1,
     )
     threshold = max(tolerance.position * 5, extent * 0.08)
     for cost, _, _, reference_entity, student_entity in pairs:
