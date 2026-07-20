@@ -39,6 +39,12 @@ class GradingPipelineOutput:
     def rubric_selection(self) -> dict[str, str | None]:
         return {"rubric_id": self.rubric_id, "source": self.rubric_source}
 
+@dataclass(frozen=True, slots=True)
+class ReviewArtifacts:
+    reviewed_drawing: ReviewedDrawing
+    response: dict[str, Any]
+
+
 
 def reference_fingerprint(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -210,8 +216,8 @@ def normalization_decision(output: GradingPipelineOutput) -> dict[str, Any]:
     }
 
 
-def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
-    """Build the stable JSON/SVG contract after successful deterministic grading."""
+def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
+    """Build the immutable drawing and stable response together exactly once."""
 
     reviewed = build_reviewed_drawing(
         output.reference,
@@ -221,7 +227,7 @@ def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
     )
     issues = _issue_payload(reviewed)
     finding_counts = _finding_counts(issues, reviewed)
-    return {
+    response = {
         "score": output.comparison["score"],
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
@@ -257,3 +263,9 @@ def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
         },
         "svg": render_svg(reviewed),
     }
+    return ReviewArtifacts(reviewed_drawing=reviewed, response=response)
+
+
+def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
+    """Backward-compatible stable JSON/SVG response helper."""
+    return build_review_artifacts(output).response

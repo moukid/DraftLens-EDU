@@ -25,12 +25,25 @@ const ruleBasedOption = completionPolicyInput.querySelector('option[value="rule_
 ruleBasedOption.textContent = "Rule-based completion";
 const approveButton = byId("approve-rubric");
 const reviewButton = byId("run-review");
+const downloadReportButton = byId("download-report");
+const metadataInputs = [byId("student-metadata-name"), byId("student-metadata-id"), byId("course-section")];
+
 
 referenceInput.addEventListener("change", () => inspectReference(referenceInput.files[0] || null));
 studentInput.addEventListener("change", () => selectStudent(studentInput.files[0] || null));
 fallbackInput.addEventListener("change", updateReviewAvailability);
 approveButton.addEventListener("click", approveRubric);
 reviewButton.addEventListener("click", runReview);
+downloadReportButton.addEventListener("click", downloadReport);
+metadataInputs.forEach((input) => input.addEventListener("input", () => {
+  const hadReview = Boolean(state.review);
+  resetReview();
+  updateReviewAvailability();
+  if (hadReview) {
+    setWorkflowStatus("Metadata changed - regenerate review", "warning");
+  }
+}));
+
 completionPolicyInput.addEventListener("change", () => {
   if (!state.provisionalRubric) return;
   state.provisionalRubric.completion_scoring_mode = completionPolicyInput.value;
@@ -114,6 +127,8 @@ function setLoading(loading, message) {
   normalizationModeInput.disabled = loading;
   assignmentTypeInput.disabled = loading;
   reviewButton.textContent = loading && message === "review" ? "Generating review…" : "Generate visual review";
+  metadataInputs.forEach((input) => { input.disabled = loading; });
+  updateReportAvailability();
   approveButton.textContent = loading && message === "approval" ? "Approving…" : "Approve rubric";
   updateWeightTotal();
   updateReviewAvailability();
@@ -146,6 +161,9 @@ function resetReview() {
   state.review = null;
   state.filter = "all";
   resetNormalizationDecision();
+  downloadReportButton.disabled = true;
+  byId("report-status").textContent = "Generate a review to enable its authoritative report.";
+
   resetIssueSelection("Select an issue in the list or drawing.");
   byId("review-results").hidden = true;
   byId("review-placeholder").hidden = false;
@@ -487,6 +505,18 @@ function updateReviewAvailability() {
   reviewButton.disabled = state.loading || !canRunReview();
 }
 
+function updateReportAvailability() {
+  const available = Boolean(state.review && state.review.review_id && state.review.report_available);
+  downloadReportButton.disabled = state.loading || !available;
+  if (available) byId("report-status").textContent = "Authoritative PDF report ready.";
+}
+
+function downloadReport() {
+  if (!state.review || !state.review.review_id || !state.review.report_available) return;
+  const reviewId = encodeURIComponent(state.review.review_id);
+  window.location.assign("/api/reviews/" + reviewId + "/report.pdf");
+}
+
 async function runReview() {
   if (!canRunReview()) return;
   hideError();
@@ -498,10 +528,15 @@ async function runReview() {
   form.append("student", state.student, state.student.name);
   if (state.rubricId) form.append("rubric_id", state.rubricId);
   if (fallbackInput.checked && !state.rubricId) form.append("allow_fallback", "true");
+  const metadataFields = [["student_name", metadataInputs[0]], ["student_id", metadataInputs[1]], ["course_section", metadataInputs[2]]];
+  metadataFields.forEach(([name, input]) => {
+    if (input.value.trim()) form.append(name, input.value);
+  });
 
   try {
     state.review = await requestJson("/api/review", {method: "POST", body: form});
     renderResults(state.review);
+    updateReportAvailability();
     setWorkflowStatus("Review complete", "success");
   } catch (error) {
     resetReview();

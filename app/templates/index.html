@@ -106,7 +106,20 @@
           <input id="student-file" type="file" accept=".dxf">
           <strong id="student-name">Choose a .dxf file</strong>
         </label>
+        <div class="student-metadata" aria-label="Optional student metadata">
+          <label class="field" for="student-metadata-name">Student name
+            <input id="student-metadata-name" type="text" maxlength="120" autocomplete="name">
+          </label>
+          <label class="field" for="student-metadata-id">Student ID
+            <input id="student-metadata-id" type="text" maxlength="64" autocomplete="off">
+          </label>
+          <label class="field" for="course-section">Course / section
+            <input id="course-section" type="text" maxlength="120" autocomplete="off">
+          </label>
+        </div>
         <button id="run-review" type="button" class="primary-button" disabled>Generate visual review</button>
+        <button id="download-report" type="button" class="report-button" disabled>Download PDF report</button>
+        <p id="report-status" class="supporting-text" role="status">Generate a review to enable its authoritative report.</p>
         <p id="api-error" class="error-message" role="alert" hidden></p>
       </section>
     </aside>

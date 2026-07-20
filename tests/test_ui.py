@@ -63,6 +63,11 @@ def test_visual_review_page_exposes_complete_semantic_workflow():
         "approve-rubric",
         "fallback-mode",
         "student-file",
+        "student-metadata-name",
+        "student-metadata-id",
+        "course-section",
+        "download-report",
+        "report-status",
         "run-review",
         "review-results",
         "result-score",
@@ -298,3 +303,25 @@ def test_stage_2b_ui_contains_no_forbidden_feature_hooks():
     assert "annotated dxf" not in html
     assert "/api/report" not in javascript
     assert "websocket" not in javascript
+
+
+def test_optional_metadata_and_authoritative_pdf_download_are_wired():
+    _, parser = page()
+    javascript = client.get("/static/app.js").text
+
+    assert parser.elements["student-metadata-name"][1]["maxlength"] == "120"
+    assert parser.elements["student-metadata-id"][1]["maxlength"] == "64"
+    assert parser.elements["course-section"][1]["maxlength"] == "120"
+    assert "disabled" in parser.elements["download-report"][1]
+    assert 'const metadataFields = [["student_name", metadataInputs[0]], ["student_id", metadataInputs[1]], ["course_section", metadataInputs[2]]]' in javascript
+    assert 'if (input.value.trim()) form.append(name, input.value);' in javascript
+    assert "state.review.review_id" in javascript
+    assert "state.review.report_available" in javascript
+    assert 'encodeURIComponent(state.review.review_id)' in javascript
+    assert 'window.location.assign("/api/reviews/" + reviewId + "/report.pdf")' in javascript
+
+    listener_start = javascript.index('metadataInputs.forEach((input) => input.addEventListener("input"')
+    listener_end = javascript.index('completionPolicyInput.addEventListener', listener_start)
+    metadata_listener = javascript[listener_start:listener_end]
+    assert "resetReview();" in metadata_listener
+    assert "markRubricDirty();" not in metadata_listener

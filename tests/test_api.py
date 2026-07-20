@@ -160,6 +160,10 @@ def test_review_uses_associated_approved_rubric_and_returns_stable_contract():
  assert len(body["extents"])==4
  assert body["issues"] and body["technical_feedback"]
  assert body["svg"].startswith("<svg ")
+ assert isinstance(body["review_id"],str) and body["review_id"]
+ assert body["report_available"] is True
+ assert body["report_timestamp"].endswith("Z")
+ assert body["student_metadata"]=={"student_name":None,"student_id":None,"course_section":None}
  for finding in body["issues"]:
   assert {"issue_id","visual_role","css_classes","finding_role","technical_feedback","deduction","raw_deduction","applied_deduction","deduction_status","suppression_reason","rubric_rule_id","confidence","correction_guidance","recommended_commands"}<=finding.keys()
 
@@ -303,6 +307,10 @@ def test_review_repeated_requests_are_deterministic():
  _review_approve()
  first=_post_review().json()
  second=_post_review().json()
+ assert first["review_id"]!=second["review_id"]
+ for payload in (first,second):
+  payload.pop("review_id")
+  payload.pop("report_timestamp")
  assert first==second
  assert first["svg"]==second["svg"]
 

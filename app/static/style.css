@@ -160,6 +160,26 @@ ul { padding-left: 18px; }
   white-space: nowrap;
 }
 
+.student-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.student-metadata .field:last-child { grid-column: 1 / -1; }
+
+.report-button {
+  width: 100%;
+  min-height: 39px;
+  margin-top: 8px;
+  border: 1px solid var(--green);
+  border-radius: 7px;
+  background: white;
+  color: var(--green);
+  font-weight: 800;
+}
+.report-button:not(:disabled):hover { background: var(--green-soft); }
+
 .validation-state {
   display: inline-flex;
   margin-top: 11px;

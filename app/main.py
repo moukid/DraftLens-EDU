@@ -1,15 +1,21 @@
 from __future__ import annotations
 import html,os,uuid
+from dataclasses import dataclass
 from pathlib import Path
 from fastapi import FastAPI,File,Form,HTTPException,UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment,FileSystemLoader,select_autoescape
 from pydantic import BaseModel, Field
 from .analysis import analyze_assignment
 from .dxf import DXFParseError,parse_dxf_bytes
 from .feedback import generate_feedback
-from .review_service import PipelineContractError, build_review_response, normalization_decision, reference_fingerprint, run_grading_pipeline
+from .pdf_report import content_disposition, generate_pdf
+from .review_service import GradingPipelineOutput, PipelineContractError, build_review_artifacts, normalization_decision, reference_fingerprint, run_grading_pipeline
+from .review_snapshot import (
+    ReviewSnapshotStore, SnapshotCapacityError, SnapshotExpired, SnapshotNotFound,
+    StudentMetadataError, normalize_student_metadata,
+)
 from .rubric import Rubric, default_rubric
 from .validator import validate_reference
 ROOT=Path(__file__).parent; templates=Environment(loader=FileSystemLoader(ROOT/"templates"),autoescape=select_autoescape())
@@ -17,6 +23,17 @@ app=FastAPI(title="DraftLens EDU",version="0.2.0"); app.mount("/static",StaticFi
 RUBRICS: dict[str, Rubric] = {}
 REFERENCE_RUBRICS: dict[str, str] = {}
 RUBRIC_REFERENCES: dict[str, str] = {}
+REVIEW_SNAPSHOTS = ReviewSnapshotStore()
+
+@dataclass(frozen=True, slots=True)
+class UploadedPipelineResult:
+    output: GradingPipelineOutput
+    reference_filename: str
+    reference_bytes: bytes
+    student_filename: str
+    student_bytes: bytes
+
+
 
 class RubricApprovalRequest(BaseModel):
     reference_id: str = Field(min_length=64, max_length=64)
@@ -52,7 +69,7 @@ async def run_uploaded_pipeline(
     if rubric and rubric.filename:
         raise HTTPException(409, "Inline rubric uploads are no longer accepted. Approve and associate the rubric before grading.")
     try:
-        return run_grading_pipeline(
+        output = run_grading_pipeline(
             reference_bytes,
             student_bytes,
             rubric_id=rubric_id,
@@ -65,6 +82,13 @@ async def run_uploaded_pipeline(
             rubrics=RUBRICS,
             reference_rubrics=REFERENCE_RUBRICS,
             rubric_references=RUBRIC_REFERENCES,
+        )
+        return UploadedPipelineResult(
+            output=output,
+            reference_filename=reference.filename or "reference.dxf",
+            reference_bytes=reference_bytes,
+            student_filename=student.filename or "student.dxf",
+            student_bytes=student_bytes,
         )
     except PipelineContractError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -83,10 +107,11 @@ async def grade(
     radius_tolerance: float = Form(1),
     rubric: UploadFile | None = File(None),
 ):
-    output = await run_uploaded_pipeline(
+    uploaded = await run_uploaded_pipeline(
         reference, student, rubric_id, allow_fallback, position_tolerance,
         length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric,
     )
+    output = uploaded.output
     result = output.comparison
     feedback = None
     try:
@@ -120,12 +145,52 @@ async def review(
     dimension_tolerance: float = Form(1),
     radius_tolerance: float = Form(1),
     rubric: UploadFile | None = File(None),
+    student_name: str | None = Form(None),
+    student_id: str | None = Form(None),
+    course_section: str | None = Form(None),
 ):
-    output = await run_uploaded_pipeline(
+    uploaded = await run_uploaded_pipeline(
         reference, student, rubric_id, allow_fallback, position_tolerance,
         length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric,
     )
-    return build_review_response(output)
+    try:
+        metadata = normalize_student_metadata(student_name, student_id, course_section)
+    except StudentMetadataError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    artifacts = build_review_artifacts(uploaded.output)
+    try:
+        snapshot = REVIEW_SNAPSHOTS.create(
+            reference_filename=uploaded.reference_filename,
+            reference_bytes=uploaded.reference_bytes,
+            student_filename=uploaded.student_filename,
+            student_bytes=uploaded.student_bytes,
+            student_metadata=metadata,
+            approved_rubric_id=uploaded.output.rubric_id,
+            approved_rubric=uploaded.output.rubric.model_dump(),
+            assignment_type=uploaded.output.rubric.assignment_type,
+            suggested_assignment_type=uploaded.output.analysis["suggested_assignment_type"],
+            detected_features=uploaded.output.analysis["detected_features"],
+            reviewed_drawing=artifacts.reviewed_drawing,
+            review_response=artifacts.response,
+        )
+    except SnapshotCapacityError as exc:
+        raise HTTPException(413, str(exc)) from exc
+    return snapshot.review_response
+
+@app.get("/api/reviews/{review_id}/report.pdf")
+def download_pdf_report(review_id: str):
+    try:
+        snapshot = REVIEW_SNAPSHOTS.get(review_id)
+    except SnapshotExpired as exc:
+        raise HTTPException(410, "The review report has expired. Generate a new review.") from exc
+    except SnapshotNotFound as exc:
+        raise HTTPException(404, "The review report was not found.") from exc
+    pdf = generate_pdf(snapshot)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": content_disposition(snapshot)},
+    )
 @app.post("/api/reference/validate")
 async def reference_validate(reference: UploadFile = File(...)):
     drawing = parse_dxf_bytes(await read_upload(reference), source="reference")
