@@ -253,6 +253,35 @@ def test_assignment_type_is_instructor_confirmed_and_invalidates_approval():
     assert 'byId("result-assignment-type").textContent' in javascript
     assert 'byId("result-detected-features").textContent' in javascript
 
+
+def test_reference_analysis_timeout_clears_loading_and_displays_error():
+    javascript = client.get("/static/app.js").text
+    request_json = javascript[
+        javascript.index("async function requestJson"):
+        javascript.index("function clearChildren")
+    ]
+    inspect_reference = javascript[
+        javascript.index("async function inspectReference"):
+        javascript.index("function renderValidation")
+    ]
+    show_error = javascript[
+        javascript.index("function showError"):
+        javascript.index("function hideError")
+    ]
+
+    assert "const REFERENCE_ANALYSIS_TIMEOUT_MS = 30000;" in javascript
+    assert "new AbortController()" in request_json
+    assert "controller.abort()" in request_json
+    assert 'error.name === "AbortError"' in request_json
+    assert "timeoutError.status = 408;" in request_json
+    assert "window.clearTimeout(timeoutId)" in request_json
+    assert inspect_reference.count("REFERENCE_ANALYSIS_TIMEOUT_MS") == 3
+    assert "showError(error);" in inspect_reference
+    assert "finally" in inspect_reference
+    assert "setLoading(false);" in inspect_reference
+    assert "element.textContent = message;" in show_error
+
+
 def test_completion_policy_and_applied_deduction_contract_are_visible():
     response, parser = page()
     assert parser.elements["completion-scoring-mode"][0] == "select"

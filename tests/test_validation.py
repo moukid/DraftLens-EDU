@@ -1,3 +1,5 @@
+from time import perf_counter
+
 from app.analysis import analyze_assignment
 from app.models import Drawing, Entity
 from app.validator import validate_reference
@@ -68,3 +70,53 @@ def test_abstract_geometry_profile_is_neutral_structural_and_deterministic():
         "possible repeated or symmetric structure",
         "mixed geometric primitives",
     } <= set(first["detected_features"])
+
+
+def test_duplicate_geometry_hash_grouping_is_deterministic():
+    drawing = Drawing(
+        [
+            _line("R-1", (0, 0), (10, 0)),
+            _line("R-2", (0, 0), (10, 0)),
+            _line("R-3", (20, 0), (30, 0)),
+        ],
+        (0, 0, 30, 0),
+        units="mm",
+        units_code=4,
+    )
+
+    first = validate_reference(drawing)
+    repeated = validate_reference(drawing)
+    duplicates = [
+        finding
+        for finding in first["findings"]
+        if finding["code"] == "duplicate_geometry"
+    ]
+
+    assert first == repeated
+    assert [finding["entity_id"] for finding in duplicates] == ["R-2"]
+
+
+def test_large_synthetic_reference_analysis_is_bounded_and_warning_free():
+    entities = [
+        _line(f"R-{index:04d}", (0, index * 20), (4, index * 20))
+        for index in range(600)
+    ]
+    for index, entity in enumerate(entities):
+        entity.layer = f"LAYER-{index:04d}"
+    drawing = Drawing(
+        entities,
+        (0, 0, 4, (len(entities) - 1) * 20),
+        units="mm",
+        units_code=4,
+    )
+
+    started = perf_counter()
+    validation = validate_reference(drawing)
+    analysis = analyze_assignment(drawing)
+    elapsed = perf_counter() - started
+
+    assert validation["findings"] == []
+    assert validation == validate_reference(drawing)
+    assert analysis == analyze_assignment(drawing)
+    assert validation["summary"]["supported_entities"] == len(entities)
+    assert elapsed < 5

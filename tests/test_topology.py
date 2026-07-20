@@ -1,5 +1,8 @@
+from time import perf_counter
+
 import pytest
 
+import app.topology as topology
 from app.models import Drawing, Entity
 from app.topology import build_topology, compare_topology
 
@@ -162,6 +165,78 @@ def test_interior_crossing_is_not_automatically_a_connection():
 
     assert graph.connections == ()
     assert len(graph.components) == 2
+
+
+def test_spatial_endpoint_clustering_preserves_transitive_tolerance_groups():
+    graph = build_topology(
+        drawing(
+            line("R-1", (-0.10, -1), (-0.10, 1)),
+            line("R-2", (-0.05, -1), (-0.05, 1)),
+            line("R-3", (0.00, -1), (0.00, 1)),
+        ),
+        tolerance=0.075,
+    )
+
+    endpoint_connections = [
+        connection
+        for connection in graph.connections
+        if connection.kind == "endpoint_endpoint"
+    ]
+    assert len(graph.nodes) == 2
+    assert len(endpoint_connections) == 2
+    assert {len(connection.endpoint_ids) for connection in endpoint_connections} == {3}
+
+
+def test_polyline_interior_t_junction_remains_detected():
+    base = Entity(
+        id="R-BASE",
+        kind="polyline",
+        layer="BASE",
+        source="reference",
+        points=[(0, 0), (10, 0), (10, 10)],
+        bbox=(0, 0, 10, 10),
+        centroid=(20 / 3, 10 / 3),
+    )
+    graph = build_topology(
+        drawing(base, line("R-BRANCH", (5, 0), (5, 5))),
+        tolerance=0.1,
+    )
+
+    contacts = [
+        connection
+        for connection in graph.connections
+        if connection.kind == "endpoint_interior"
+    ]
+    assert len(contacts) == 1
+    assert contacts[0].interior_entity_ids == ("R-BASE",)
+    assert contacts[0].point == pytest.approx((5, 0))
+
+
+def test_large_spatial_topology_uses_bounded_exact_segment_candidates(monkeypatch):
+    entities = [
+        line(f"R-{index:04d}", (0, index * 20), (4, index * 20))
+        for index in range(800)
+    ]
+    projection_calls = 0
+    original_projection = topology._projection
+
+    def counted_projection(*args):
+        nonlocal projection_calls
+        projection_calls += 1
+        return original_projection(*args)
+
+    monkeypatch.setattr(topology, "_projection", counted_projection)
+    started = perf_counter()
+    first = build_topology(drawing(*entities), tolerance=0.1).to_dict()
+    elapsed = perf_counter() - started
+    first_call_count = projection_calls
+    repeated = build_topology(drawing(*entities), tolerance=0.1).to_dict()
+
+    assert first == repeated
+    assert first["connections"] == []
+    assert len(first["components"]) == len(entities)
+    assert first_call_count < len(entities) * 100
+    assert elapsed < 5
 
 
 def test_topology_ids_and_results_are_deterministic():

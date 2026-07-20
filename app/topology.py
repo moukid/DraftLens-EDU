@@ -226,6 +226,14 @@ class _EndpointCandidate:
     point: Point
 
 
+@dataclass(frozen=True, slots=True)
+class _SegmentCandidate:
+    entity_id: str
+    start: Point
+    end: Point
+    bounds: tuple[float, float, float, float]
+
+
 def _entity_endpoint_points(entity: Entity) -> tuple[tuple[str, Point], ...]:
     if entity.kind == "line" and len(entity.points) >= 2:
         return (("start", entity.points[0]), ("end", entity.points[-1]))
@@ -310,6 +318,87 @@ def _union_find(items: Iterable[str]):
     return parent, find, union
 
 
+def _grid_cell(point: Point, cell_size: float) -> tuple[int, int]:
+    return math.floor(point[0] / cell_size), math.floor(point[1] / cell_size)
+
+
+def _cluster_endpoint_candidates(
+    candidates: tuple[_EndpointCandidate, ...],
+    tolerance: float,
+    union_endpoint,
+) -> None:
+    buckets: dict[tuple[int, int], list[_EndpointCandidate]] = {}
+    for candidate in candidates:
+        cell_x, cell_y = _grid_cell(candidate.point, tolerance)
+        for offset_x in (-1, 0, 1):
+            for offset_y in (-1, 0, 1):
+                for other in buckets.get(
+                    (cell_x + offset_x, cell_y + offset_y), ()
+                ):
+                    if math.dist(candidate.point, other.point) <= tolerance:
+                        union_endpoint(candidate.id, other.id)
+        buckets.setdefault((cell_x, cell_y), []).append(candidate)
+
+
+def _segment_candidates(
+    entities: list[Entity],
+) -> tuple[_SegmentCandidate, ...]:
+    return tuple(
+        _SegmentCandidate(
+            entity.id,
+            start,
+            end,
+            (
+                min(start[0], end[0]),
+                min(start[1], end[1]),
+                max(start[0], end[0]),
+                max(start[1], end[1]),
+            ),
+        )
+        for entity in entities
+        for start, end in _segments(entity)
+    )
+
+
+def _segment_spatial_index(
+    segments: tuple[_SegmentCandidate, ...],
+    tolerance: float,
+) -> tuple[
+    float,
+    dict[tuple[int, int], list[_SegmentCandidate]],
+    tuple[_SegmentCandidate, ...],
+]:
+    if not segments:
+        return tolerance, {}, ()
+    min_x = min(segment.bounds[0] for segment in segments)
+    min_y = min(segment.bounds[1] for segment in segments)
+    max_x = max(segment.bounds[2] for segment in segments)
+    max_y = max(segment.bounds[3] for segment in segments)
+    span = max(max_x - min_x, max_y - min_y, tolerance)
+    cell_size = max(tolerance * 2.0, span / max(1.0, math.sqrt(len(segments))))
+    buckets: dict[tuple[int, int], list[_SegmentCandidate]] = {}
+    long_segments: list[_SegmentCandidate] = []
+    for segment in segments:
+        min_cell = _grid_cell(
+            (segment.bounds[0] - tolerance, segment.bounds[1] - tolerance),
+            cell_size,
+        )
+        max_cell = _grid_cell(
+            (segment.bounds[2] + tolerance, segment.bounds[3] + tolerance),
+            cell_size,
+        )
+        cell_count = (max_cell[0] - min_cell[0] + 1) * (
+            max_cell[1] - min_cell[1] + 1
+        )
+        if cell_count > 256:
+            long_segments.append(segment)
+            continue
+        for cell_x in range(min_cell[0], max_cell[0] + 1):
+            for cell_y in range(min_cell[1], max_cell[1] + 1):
+                buckets.setdefault((cell_x, cell_y), []).append(segment)
+    return cell_size, buckets, tuple(long_segments)
+
+
 def build_topology(drawing: Drawing, tolerance: float = 1e-6) -> TopologyGraph:
     """Build a deterministic endpoint graph without treating terminals as errors."""
 
@@ -323,11 +412,8 @@ def build_topology(drawing: Drawing, tolerance: float = 1e-6) -> TopologyGraph:
         for entity in entities
         for role, point in _entity_endpoint_points(entity)
     )
-    candidate_by_id = {item.id: item for item in candidates}
     _, find_endpoint, union_endpoint = _union_find(item.id for item in candidates)
-    for first, second in combinations(candidates, 2):
-        if math.dist(first.point, second.point) <= tolerance:
-            union_endpoint(first.id, second.id)
+    _cluster_endpoint_candidates(candidates, tolerance, union_endpoint)
 
     clusters: dict[str, list[_EndpointCandidate]] = {}
     for candidate in candidates:
@@ -341,26 +427,33 @@ def build_topology(drawing: Drawing, tolerance: float = 1e-6) -> TopologyGraph:
     interior_contacts: dict[str, dict[str, tuple[Point, float]]] = {
         root: {} for root in clusters
     }
+    cluster_entity_ids = {
+        root: {item.entity_id for item in members}
+        for root, members in clusters.items()
+    }
+    segments = _segment_candidates(entities)
+    segment_cell_size, segment_buckets, long_segments = _segment_spatial_index(
+        segments, tolerance
+    )
     for candidate in candidates:
         root = candidate_cluster[candidate.id]
-        member_entity_ids = {item.entity_id for item in clusters[root]}
-        for entity in entities:
-            if entity.id in member_entity_ids:
+        nearby_segments = segment_buckets.get(
+            _grid_cell(candidate.point, segment_cell_size), ()
+        )
+        for segment in (*nearby_segments, *long_segments):
+            if segment.entity_id in cluster_entity_ids[root]:
                 continue
-            if any(
-                endpoint.entity_id == entity.id
-                and candidate_cluster[endpoint.id] == root
-                for endpoint in candidates
-            ):
+            factor, projected, distance = _projection(
+                candidate.point, segment.start, segment.end
+            )
+            if not 1e-9 < factor < 1.0 - 1e-9 or distance > tolerance:
                 continue
-            contact = _closest_point(entity, candidate.point, interior_only=True)
-            if contact is None or contact[1] > tolerance:
-                continue
-            previous = interior_contacts[root].get(entity.id)
+            contact = (projected, distance)
+            previous = interior_contacts[root].get(segment.entity_id)
             if previous is None or (contact[1], contact[0]) < (
                 previous[1], previous[0]
             ):
-                interior_contacts[root][entity.id] = contact
+                interior_contacts[root][segment.entity_id] = contact
 
     node_by_root: dict[str, TopologyNode] = {}
     for root, members in sorted(clusters.items(), key=lambda item: tuple(x.id for x in item[1])):

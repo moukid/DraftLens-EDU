@@ -1,5 +1,7 @@
 "use strict";
 
+const REFERENCE_ANALYSIS_TIMEOUT_MS = 30000;
+
 const state = {
   reference: null,
   student: null,
@@ -90,8 +92,24 @@ function uploadForm(field, file) {
   return form;
 }
 
-async function requestJson(url, options) {
-  const response = await fetch(url, options);
+async function requestJson(url, options, timeoutMs = 0) {
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  let response;
+  try {
+    response = await fetch(url, controller ? {...options, signal: controller.signal} : options);
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      const timeoutError = new Error("Reference analysis exceeded 30 seconds. Try the file again or simplify unusually complex geometry.");
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+  }
   let body = {};
   try {
     body = await response.json();
@@ -280,9 +298,9 @@ async function inspectReference(file) {
 
   try {
     const [validationResponse, analysis, suggestion] = await Promise.all([
-      requestJson("/api/reference/validate", {method: "POST", body: uploadForm("reference", file)}),
-      requestJson("/api/assignment/analyze", {method: "POST", body: uploadForm("reference", file)}),
-      requestJson("/api/rubric/suggest", {method: "POST", body: uploadForm("reference", file)}),
+      requestJson("/api/reference/validate", {method: "POST", body: uploadForm("reference", file)}, REFERENCE_ANALYSIS_TIMEOUT_MS),
+      requestJson("/api/assignment/analyze", {method: "POST", body: uploadForm("reference", file)}, REFERENCE_ANALYSIS_TIMEOUT_MS),
+      requestJson("/api/rubric/suggest", {method: "POST", body: uploadForm("reference", file)}, REFERENCE_ANALYSIS_TIMEOUT_MS),
     ]);
     const validation = validationResponse.validation;
     state.referenceId = suggestion.reference_id;
