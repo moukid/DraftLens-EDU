@@ -1,5 +1,6 @@
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 import xml.etree.ElementTree as ET
 
 from fastapi.testclient import TestClient
@@ -109,12 +110,27 @@ def test_ui_assets_are_served_from_fastapi_static_mount():
 
 def test_page_has_no_external_or_cdn_dependencies():
     response, parser = page()
-    assert parser.assets == ["/static/style.css", "data:,", "/static/app.js"]
+    assert parser.assets == ["/static/style.css?v=0.2.0", "data:,", "/static/app.js?v=0.2.0"]
     lowered = response.text.lower()
     assert "http://" not in lowered
     assert "https://" not in lowered
     assert "//cdn" not in lowered
     assert "node_modules" not in lowered
+
+
+def test_static_assets_share_a_deterministic_release_version():
+    _, first = page()
+    _, repeated = page()
+    static_assets = [asset for asset in first.assets if asset.startswith("/static/")]
+    versions = {
+        parse_qs(urlsplit(asset).query).get("v", [])[-1]
+        for asset in static_assets
+    }
+
+    assert static_assets == ["/static/style.css?v=0.2.0", "/static/app.js?v=0.2.0"]
+    assert versions == {"0.2.0"}
+    assert repeated.assets == first.assets
+    assert all(client.get(asset).status_code == 200 for asset in static_assets)
 
 
 def test_client_uses_existing_review_and_rubric_pipeline_contracts():
