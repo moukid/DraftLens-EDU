@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from statistics import median
 from typing import Any
 from .causal_analysis import CausalFinding, analyze_comparison
+from .correction_guidance import correction_guidance
 from .dxf import entity_length
 from .models import Drawing, Entity, Issue
 from .rubric import Rubric, ToleranceProfile, default_rubric, rubric_rule_map
@@ -607,12 +608,12 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
             deduction = rule.deduction
             severity = rule.severity
             rule_id = rule.id
-            commands = rule.commands
+
         else:
             deduction = 0.0
             severity = "warning"
             rule_id = None
-            commands = []
+
         reference_entity = finding.reference_entity
         student_entity = finding.student_entity
         location_entity = reference_entity or student_entity
@@ -677,7 +678,7 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
                 measurement=measurement,
                 rubric_rule_id=rule_id,
                 technical_feedback=action,
-                recommended_commands=list(commands),
+                recommended_commands=[],
                 expected=finding.expected,
                 actual=finding.actual,
                 derived_evidence=deepcopy(finding.derived_evidence),
@@ -745,6 +746,16 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         completion,
         suppressed_findings,
     )
+    reference_by_id = {entity.id: entity for entity in reference.entities}
+    student_by_id = {entity.id: entity for entity in matching_student.entities}
+    for issue in issues:
+        guidance = correction_guidance(
+            issue,
+            reference_by_id.get(issue.reference_entity_id),
+            student_by_id.get(issue.student_entity_id),
+        )
+        issue.correction_guidance = guidance.to_dict() if guidance else None
+        issue.recommended_commands = guidance.flattened_commands() if guidance else []
     score = scoring["score"]
     deduction = scoring["deduction"]
     breakdown = scoring["rubric_breakdown"]

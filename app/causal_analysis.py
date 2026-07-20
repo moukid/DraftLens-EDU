@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from shapely.geometry import LineString
 
+from .correction_guidance import duplicate_entity_evidence, entity_evidence
 from .dxf import entity_length
 from .models import Drawing, Entity
 from .rubric import ToleranceProfile
@@ -379,20 +380,7 @@ def _duplicate_measurement(
     coincident: Entity,
     unit: str,
 ) -> dict[str, Any]:
-    return {
-        "property": "duplicate_overlap",
-        "expected": "unique geometry",
-        "actual": "duplicate geometry",
-        "deviation": None,
-        "tolerance": 0,
-        "unit": unit,
-        "entity_type": entity.entity_type,
-        "length": entity_length(entity),
-        "angle": _angle(entity),
-        "layer": entity.layer,
-        "overlap_percentage": 100.0,
-        "coincident_entity_id": coincident.id,
-    }
+    return duplicate_entity_evidence(entity, coincident, unit)
 
 
 def analyze_comparison(
@@ -441,7 +429,13 @@ def analyze_comparison(
                 None,
                 entity,
             )
-            analysis.findings.append(CausalFinding("extra_geometry", student_entity=entity))
+            analysis.findings.append(
+                CausalFinding(
+                    "extra_geometry",
+                    student_entity=entity,
+                    measurement=entity_evidence(entity),
+                )
+            )
         else:
             measurement = _duplicate_measurement(entity, coincident, unit)
             duplicate_evidence = analysis.observe(

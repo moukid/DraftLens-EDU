@@ -105,7 +105,7 @@ def test_review_uses_associated_approved_rubric_and_returns_stable_contract():
  assert body["issues"] and body["technical_feedback"]
  assert body["svg"].startswith("<svg ")
  for finding in body["issues"]:
-  assert {"issue_id","visual_role","css_classes","finding_role","technical_feedback","deduction","raw_deduction","applied_deduction","deduction_status","suppression_reason","rubric_rule_id","confidence"}<=finding.keys()
+  assert {"issue_id","visual_role","css_classes","finding_role","technical_feedback","deduction","raw_deduction","applied_deduction","deduction_status","suppression_reason","rubric_rule_id","confidence","correction_guidance","recommended_commands"}<=finding.keys()
 
 @pytest.mark.parametrize(
  ("reference_name", "student_name"),
@@ -146,6 +146,9 @@ def test_displaced_square_separates_primary_and_supporting_findings():
  assert [finding["category"] for finding in primary]==["incorrect_position"]
  assert [finding["category"] for finding in supporting]==["endpoint_gap","endpoint_gap"]
  assert all(finding["applied_deduction"]==0 for finding in supporting)
+ assert all(finding["recommended_commands"]==[] for finding in supporting)
+ assert all(finding["correction_guidance"]["related_primary_issue_id"]==primary[0]["issue_id"] for finding in supporting)
+ assert all("linked primary issue" in finding["correction_guidance"]["explanation"] for finding in supporting)
 
 
 def test_reference_validation_notes_are_counted_separately():
@@ -175,6 +178,8 @@ def test_review_proportional_policy_suppresses_raw_missing_rule_and_reconciles_s
  assert missing["applied_deduction"]==missing["deduction"]==0
  assert missing["deduction_status"]=="suppressed"
  assert "proportional completion policy" in missing["suppression_reason"]
+ assert missing["correction_guidance"] is None
+ assert missing["recommended_commands"]==[]
  breakdown=body["score_breakdown"]
  completion=next(category for category in breakdown["category_subtotals"] if category["id"]=="completion")
  assert completion["deduction"]==pytest.approx(1.32,abs=0.01)
@@ -191,6 +196,8 @@ def test_review_default_suggested_rule_based_policy_applies_missing_rule_without
  assert missing["raw_deduction"]==missing["applied_deduction"]==missing["deduction"]==5
  assert missing["deduction_status"]=="applied"
  assert missing["suppression_reason"] is None
+ assert missing["correction_guidance"]["primary_command"]=="LINE"
+ assert missing["recommended_commands"]==["LINE","COPY"]
  breakdown=body["score_breakdown"]
  completion=next(category for category in breakdown["category_subtotals"] if category["id"]=="completion")
  assert completion["deduction"]==0

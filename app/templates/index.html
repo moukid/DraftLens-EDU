@@ -163,7 +163,19 @@
                 <div><dt>Deduction status</dt><dd id="evidence-deduction-status">—</dd></div>
                 <div><dt>Confidence</dt><dd id="evidence-confidence">—</dd></div>
               </dl>
-              <div id="feedback-commands" hidden><h3>Suggested commands</h3><ul id="command-list" class="command-list"></ul></div>
+              <div id="feedback-commands" hidden>
+                <h3>Correction guidance</h3>
+                <p id="guidance-supporting-label" class="guidance-supporting" hidden>Supporting topology evidence</p>
+                <p id="guidance-related" hidden>Resolve linked primary issue: <strong id="guidance-related-id">—</strong></p>
+                <dl class="guidance-list">
+                  <div id="guidance-primary-row"><dt>Primary correction</dt><dd id="guidance-primary">—</dd></div>
+                  <div id="guidance-alternatives-row"><dt>Alternatives</dt><dd><ul id="guidance-alternatives" class="command-list"></ul></dd></div>
+                  <div id="guidance-precision-row"><dt>Precision aid</dt><dd><ul id="guidance-precision" class="command-list"></ul></dd></div>
+                </dl>
+                <p id="guidance-explanation" class="guidance-explanation"></p>
+                <p id="guidance-no-command" class="guidance-no-command" hidden>No separate correction command</p>
+                <ul id="command-list" hidden></ul>
+              </div>
             </div>
           </aside>
         </div>

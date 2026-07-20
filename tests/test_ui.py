@@ -166,7 +166,7 @@ def test_review_state_reset_and_finding_roles_are_explicitly_wired():
     assert "state.selectedIssueId = null" in javascript
     assert 'element.classList.remove("is-selected")' in javascript
     assert 'byId("feedback-detail").hidden = true' in javascript
-    assert 'clearChildren(byId("command-list"))' in javascript
+    assert 'resetCorrectionGuidance();' in javascript
     assert "review.issues.find(isPrimaryStudentIssue)" in javascript
     assert "No student issues detected" in javascript
     assert "Supporting topology evidence" in javascript
@@ -192,6 +192,30 @@ def test_completion_policy_and_applied_deduction_contract_are_visible():
     assert 'formatDeduction(rawDeduction(issue))' in javascript
     assert "issue.suppression_reason" in javascript
     assert 'byId("evidence-deduction-status")' in javascript
+
+
+def test_structured_correction_guidance_is_labeled_and_not_rebuilt_from_rubric_commands():
+    response, parser = page()
+    javascript = client.get("/static/app.js").text
+
+    for element_id in (
+        "feedback-commands",
+        "guidance-primary",
+        "guidance-alternatives",
+        "guidance-precision",
+        "guidance-explanation",
+        "guidance-related-id",
+        "guidance-no-command",
+    ):
+        assert element_id in parser.elements
+    assert "Primary correction" in response.text
+    assert "Alternatives" in response.text
+    assert "Precision aid" in response.text
+    assert "No separate correction command" in response.text
+    assert "issue.correction_guidance" in javascript
+    assert "issue.recommended_commands" in javascript
+    command_selector = javascript[javascript.index("function commandsForIssue"):javascript.index("function renderCorrectionGuidance")]
+    assert "state.review.rubric" not in command_selector
 
 
 def test_stage_2b_ui_contains_no_forbidden_feature_hooks():

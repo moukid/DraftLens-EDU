@@ -141,6 +141,29 @@ def test_review_model_distinguishes_raw_applied_and_suppressed_deductions():
     assert finding.suppression_reason == raw_issue["suppression_reason"]
     assert finding.classification == "primary"
 
+def test_review_model_preserves_structured_and_flat_correction_guidance():
+    reference = drawing([entity("R-M", "line", [(0, 0), (10, 0)])], (0, 0, 10, 0))
+    raw_issue = issue("E-GUIDE", "missing_geometry", reference_id="R-M", deduction=5)
+    raw_issue["correction_guidance"] = {
+        "primary_command": "LINE",
+        "alternative_commands": ["COPY"],
+        "precision_aids": ["OSNAP"],
+        "explanation": "Create the missing line.",
+        "related_primary_issue_id": None,
+    }
+    raw_issue["recommended_commands"] = ["LINE", "COPY", "OSNAP"]
+
+    reviewed = build_reviewed_drawing(
+        reference,
+        drawing([], (0, 0, 0, 0)),
+        {"score": 95, "issues": [raw_issue]},
+    )
+    serialized = reviewed.issues[0].to_dict()
+
+    assert serialized["correction_guidance"] == raw_issue["correction_guidance"]
+    assert serialized["recommended_commands"] == raw_issue["recommended_commands"]
+
+
 def test_svg_contains_expected_visual_conventions_and_dual_overlay():
     svg = render_svg(review_with_all_overlay_roles())
     assert 'data-role="missing"' in svg and 'class="missing"' in svg

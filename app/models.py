@@ -71,6 +71,7 @@ class Issue:
     technical_feedback: str = ""
     learning_topic: str = "Geometric precision"
     recommended_commands: list[str] = field(default_factory=list)
+    correction_guidance: dict[str, Any] | None = None
     expected: Any = None
     actual: Any = None
     derived_evidence: list[dict[str, Any]] = field(default_factory=list)

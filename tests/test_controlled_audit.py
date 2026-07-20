@@ -168,10 +168,6 @@ def test_shortened_line_centroid_shift_is_derived_evidence(audit_outputs):
     assert centroid["actual"] == pytest.approx(10)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_shortened_line_recommends_endpoint_correction_commands(audit_outputs):
     length_issue = issues(audit_outputs, SHORT, "incorrect_length")[0]
     assert {"LENGTHEN", "STRETCH", "EXTEND", "OSNAP"} <= set(
@@ -226,10 +222,6 @@ def test_rotated_line_centroid_shift_is_derived_evidence(audit_outputs):
     assert centroid["actual"] == pytest.approx(8.715574, abs=1e-6)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_rotated_line_recommends_rotation_not_move(audit_outputs):
     angle_issue = issues(audit_outputs, ROTATED_LINE, "incorrect_angle")[0]
     assert {"ROTATE", "REFERENCE", "OSNAP", "POLAR"} <= set(
@@ -365,10 +357,6 @@ def test_extra_line_uses_current_two_point_rule(audit_outputs):
     assert result["score"] == 98
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_extra_line_feedback_includes_geometry_evidence(audit_outputs):
     measurement = issues(audit_outputs, EXTRA, "extra_geometry")[0]["measurement"]
     assert {"entity_type", "length", "angle", "layer", "position"} <= measurement.keys()
@@ -402,10 +390,6 @@ def test_duplicate_is_one_consolidated_file_quality_deduction(audit_outputs):
     assert result["score"] == 99
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_duplicate_recommends_overkill_and_erase(audit_outputs):
     commands = set(
         issues(audit_outputs, DUPLICATE, "duplicate_geometry")[0][
@@ -511,10 +495,6 @@ def test_disconnected_corner_review_localizes_selectable_topology_issue(audit_ou
     )
     assert f'data-issue-id="{gap["issue_id"]}"' in review["svg"]
     assert 'data-role="connectivity"' in review["svg"]
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_disconnected_corner_recommends_endpoint_commands_not_move(audit_outputs):
     commands = {
         command

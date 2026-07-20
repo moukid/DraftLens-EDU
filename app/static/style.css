@@ -506,6 +506,23 @@ fieldset legend { padding: 0 4px; }
 }
 .evidence-list dd { font-size: 11px; font-weight: 650; }
 #feedback-commands { margin-top: 14px; }
+.guidance-supporting, .guidance-no-command {
+  margin: 8px 0;
+  color: #775100;
+  font-size: 11px;
+  font-weight: 800;
+}
+.guidance-list { margin: 8px 0 0; }
+.guidance-list > div {
+  padding: 7px 0;
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 10px;
+  border-top: 1px solid var(--line);
+}
+.guidance-list dt { font-size: 11px; color: var(--muted); }
+.guidance-list dd { font-size: 11px; font-weight: 650; }
+.guidance-explanation { margin-top: 8px; color: #435159; font-size: 11px; }
 .command-list { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; list-style: none; }
 .command-list li {
   padding: 4px 7px;

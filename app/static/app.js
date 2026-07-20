@@ -166,7 +166,22 @@ function resetIssueSelection(message) {
     "evidence-deduction-status",
     "evidence-confidence",
   ].forEach((id) => { byId(id).textContent = "—"; });
-  clearChildren(byId("command-list"));
+  resetCorrectionGuidance();
+}
+
+function resetCorrectionGuidance() {
+  ["command-list", "guidance-alternatives", "guidance-precision"].forEach((id) => clearChildren(byId(id)));
+  byId("guidance-primary").textContent = "—";
+  byId("guidance-related-id").textContent = "—";
+  byId("guidance-explanation").textContent = "";
+  [
+    "guidance-primary-row",
+    "guidance-alternatives-row",
+    "guidance-precision-row",
+    "guidance-supporting-label",
+    "guidance-related",
+    "guidance-no-command",
+  ].forEach((id) => { byId(id).hidden = true; });
   byId("feedback-commands").hidden = true;
 }
 function resetReferenceDependentState() {
@@ -658,27 +673,56 @@ function renderFeedback(issue) {
   byId("evidence-deduction-status").textContent = deductionStatusText(issue);
   byId("evidence-confidence").textContent = humanize(issue.confidence);
 
-  const commands = commandsForIssue(issue);
-  const commandBox = byId("feedback-commands");
-  const commandList = byId("command-list");
-  clearChildren(commandList);
+  renderCorrectionGuidance(issue);
+}
+
+function appendCommandItems(elementId, commands) {
+  const list = byId(elementId);
+  clearChildren(list);
   commands.forEach((command) => {
     const item = document.createElement("li");
     item.textContent = command;
-    commandList.append(item);
+    list.append(item);
   });
-  commandBox.hidden = commands.length === 0;
 }
 
 function commandsForIssue(issue) {
-  const categories = state.review && state.review.rubric ? state.review.rubric.categories || [] : [];
-  for (const category of categories) {
-    const rule = (category.rules || []).find((item) => item.id === issue.rubric_rule_id);
-    if (rule) return Array.isArray(rule.commands) ? rule.commands : [];
-  }
-  return [];
+  if (Array.isArray(issue.recommended_commands)) return [...new Set(issue.recommended_commands)];
+  const guidance = issue.correction_guidance;
+  if (!guidance) return [];
+  return [...new Set([
+    guidance.primary_command,
+    ...(guidance.alternative_commands || []),
+    ...(guidance.precision_aids || []),
+  ].filter(Boolean))];
 }
 
+function renderCorrectionGuidance(issue) {
+  resetCorrectionGuidance();
+  const guidance = issue.correction_guidance;
+  if (!guidance) return;
+
+  const primary = guidance.primary_command || "";
+  const alternatives = Array.isArray(guidance.alternative_commands) ? guidance.alternative_commands : [];
+  const precisionAids = Array.isArray(guidance.precision_aids) ? guidance.precision_aids : [];
+  const relatedId = guidance.related_primary_issue_id || "";
+  const explanation = guidance.explanation || "";
+  const commands = commandsForIssue(issue);
+
+  appendCommandItems("command-list", commands);
+  appendCommandItems("guidance-alternatives", alternatives);
+  appendCommandItems("guidance-precision", precisionAids);
+  byId("guidance-primary").textContent = primary || "—";
+  byId("guidance-explanation").textContent = explanation;
+  byId("guidance-related-id").textContent = relatedId || "—";
+  byId("guidance-primary-row").hidden = !primary;
+  byId("guidance-alternatives-row").hidden = alternatives.length === 0;
+  byId("guidance-precision-row").hidden = precisionAids.length === 0;
+  byId("guidance-related").hidden = !relatedId;
+  byId("guidance-supporting-label").hidden = findingRole(issue) !== "supporting";
+  byId("guidance-no-command").hidden = Boolean(primary);
+  byId("feedback-commands").hidden = !(primary || alternatives.length || precisionAids.length || relatedId || explanation);
+}
 function formatMeasurement(measurement) {
   if (measurement === null || measurement === undefined) return "No numeric measurement";
   if (typeof measurement !== "object") return String(measurement);

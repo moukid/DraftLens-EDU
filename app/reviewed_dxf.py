@@ -60,6 +60,8 @@ class ReviewedIssue:
     classification: str
     provenance: str
     measurement_json: str
+    correction_guidance_json: str
+    recommended_commands: tuple[str, ...]
 
     @property
     def measurement(self) -> Any:
@@ -70,6 +72,10 @@ class ReviewedIssue:
         data["actual_geometry"] = self.actual_geometry.to_dict() if self.actual_geometry else None
         data["expected_geometry"] = self.expected_geometry.to_dict() if self.expected_geometry else None
         data["measurement"] = json.loads(data.pop("measurement_json"))
+        data["correction_guidance"] = json.loads(
+            data.pop("correction_guidance_json")
+        )
+        data["recommended_commands"] = list(data["recommended_commands"])
         return data
 
 
@@ -284,6 +290,8 @@ def build_reviewed_drawing(
             classification=str(raw_issue.get("classification") or "primary"),
             provenance="comparison",
             measurement_json=json.dumps(deepcopy(raw_issue.get("measurement")), sort_keys=True, separators=(",", ":"), default=str),
+            correction_guidance_json=json.dumps(deepcopy(raw_issue.get("correction_guidance")), sort_keys=True, separators=(",", ":"), default=str),
+            recommended_commands=tuple(str(command) for command in raw_issue.get("recommended_commands", [])),
         ))
 
     findings = sorted(deepcopy((validation or {}).get("findings", [])), key=_validation_key)
@@ -313,6 +321,8 @@ def build_reviewed_drawing(
             classification="informational",
             provenance="reference_validation",
             measurement_json="null",
+            correction_guidance_json="null",
+            recommended_commands=(),
         ))
 
     all_regions = [entity.bbox for entity in reference_entities + student_entities if entity.bbox]
