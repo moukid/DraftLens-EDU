@@ -9,6 +9,7 @@ from shapely.geometry import LineString
 from .dxf import entity_length
 from .models import Drawing, Entity
 from .rubric import ToleranceProfile
+from .topology import TopologyComparison, compare_topology
 
 
 FindingClassification = Literal[
@@ -58,6 +59,8 @@ class CausalFinding:
     derived_evidence: list[dict[str, Any]] = field(default_factory=list)
     supporting_evidence: list[dict[str, Any]] = field(default_factory=list)
     suppressed_findings: list[dict[str, Any]] = field(default_factory=list)
+    issue_id: str | None = None
+    location: tuple[float, float] | None = None
 
 
 @dataclass(slots=True)
@@ -65,6 +68,7 @@ class CausalAnalysis:
     findings: list[CausalFinding] = field(default_factory=list)
     observations: list[Observation] = field(default_factory=list)
     suppressed_findings: list[dict[str, Any]] = field(default_factory=list)
+    topology: TopologyComparison | None = None
 
     def observe(
         self,
@@ -757,6 +761,68 @@ def analyze_comparison(
                         "moderate",
                     )
                 )
+
+    analysis.topology = compare_topology(
+        reference,
+        student,
+        matched,
+        tolerance.position,
+    )
+    reference_by_id = {entity.id: entity for entity in reference.entities}
+    student_by_id = {entity.id: entity for entity in student.entities}
+    for gap in analysis.topology.endpoint_gaps:
+        reference_entity = reference_by_id[gap.primary_reference_entity_id]
+        student_entity = student_by_id[gap.primary_student_entity_id]
+        evidence = analysis.observe(
+            "endpoint_gap",
+            0.0,
+            gap.distance,
+            tolerance.position,
+            unit,
+            reference_entity,
+            student_entity,
+            details={
+                "topology_issue_id": gap.issue_id,
+                "junction_id": gap.junction_id,
+                "reference_connection_id": gap.reference_connection_id,
+                "expected_point": list(gap.expected_point),
+                "actual_points": [list(point) for point in gap.actual_points],
+                "region": list(gap.region),
+                "affected_reference_entity_ids": list(gap.reference_entity_ids),
+                "affected_student_entity_ids": list(gap.student_entity_ids),
+            },
+        )
+        primary = next(
+            (
+                finding
+                for finding in analysis.findings
+                if finding.classification == "primary"
+                and finding.reference_entity is reference_entity
+                and finding.student_entity is student_entity
+            ),
+            None,
+        )
+        if primary is not None:
+            primary.supporting_evidence.append(evidence)
+        measurement = _measurement(evidence)
+        measurement["region"] = list(gap.region)
+        measurement["linked_primary_category"] = (
+            primary.category if primary is not None else None
+        )
+        analysis.findings.append(
+            CausalFinding(
+                "endpoint_gap",
+                reference_entity,
+                student_entity,
+                measurement,
+                0.0,
+                gap.distance,
+                "verified",
+                "supporting_evidence",
+                issue_id=gap.issue_id,
+                location=gap.expected_point,
+            )
+        )
 
     for unsupported in student.unsupported_entities:
         analysis.findings.append(

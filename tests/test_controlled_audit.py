@@ -94,11 +94,9 @@ def test_exact_copy_has_zero_student_geometry_issues(audit_outputs):
     assert issues(audit_outputs, EXACT) == []
 
 
-def test_reviewed_exact_copy_preserves_reference_note_provenance(audit_outputs):
+def test_reviewed_exact_copy_has_no_false_reference_connectivity_note(audit_outputs):
     review = build_review_response(audit_outputs[EXACT])
-    assert [item["provenance"] for item in review["issues"]] == [
-        "reference_validation"
-    ]
+    assert review["issues"] == []
 
 
 @pytest.mark.xfail(
@@ -111,10 +109,6 @@ def test_exact_copy_review_contract_separates_student_issue_count(audit_outputs)
     assert review["reference_note_count"] == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_intentional_standalone_reference_lines_are_not_connectivity_warnings(
     audit_outputs,
 ):
@@ -444,10 +438,6 @@ def test_disconnected_corner_records_expected_and_actual_line_length(audit_outpu
     assert length_issue[0]["measurement"]["actual"] == pytest.approx(95)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_disconnected_corner_records_five_unit_endpoint_gap(audit_outputs):
     topology = [
         item
@@ -462,10 +452,6 @@ def test_disconnected_corner_records_five_unit_endpoint_gap(audit_outputs):
     assert gap["measurement"]["actual"] == pytest.approx(5)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known controlled-audit defect pending Stage 3A repair",
-)
 def test_disconnected_corner_reports_broken_connectivity(audit_outputs):
     categories = {item["category"] for item in issues(audit_outputs, DISCONNECTED)}
     assert categories & {"endpoint_gap", "disconnected_geometry", "connectivity"}
@@ -491,6 +477,42 @@ def test_disconnected_corner_has_one_scored_causal_deduction(audit_outputs):
     assert len(applied) == 1
 
 
+def test_disconnected_corner_topology_is_linked_supporting_evidence(audit_outputs):
+    result = comparison(audit_outputs, DISCONNECTED)
+    length_issue = issues(audit_outputs, DISCONNECTED, "incorrect_length")[0]
+    gap = issues(audit_outputs, DISCONNECTED, "endpoint_gap")[0]
+
+    assert gap["classification"] == "supporting_evidence"
+    assert gap["applied_deduction"] == 0
+    assert gap["measurement"]["linked_primary_issue_id"] == length_issue["id"]
+    assert gap["measurement"]["linked_primary_category"] == "incorrect_length"
+    assert any(
+        item.get("topology_issue_id") == gap["id"]
+        for item in length_issue["supporting_evidence"]
+    )
+    gap_audit = next(
+        item for item in result["audit_trail"] if item["issue_id"] == gap["id"]
+    )
+    assert gap_audit["applied"] == 0
+    assert gap_audit["suppression_reason"] == (
+        "supporting_evidence findings are not scored"
+    )
+    assert result["score"] == 97
+
+
+def test_disconnected_corner_review_localizes_selectable_topology_issue(audit_outputs):
+    review = build_review_response(audit_outputs[DISCONNECTED])
+    gap = next(
+        item for item in review["issues"] if item["category"] == "endpoint_gap"
+    )
+
+    assert gap["issue_id"].startswith("T-GAP-")
+    assert gap["visual_role"] == "connectivity"
+    assert gap["region"] == pytest.approx(
+        (-113.425032, -59.721609, -113.425032, -54.721609)
+    )
+    assert f'data-issue-id="{gap["issue_id"]}"' in review["svg"]
+    assert 'data-role="connectivity"' in review["svg"]
 @pytest.mark.xfail(
     strict=True,
     reason="Known controlled-audit defect pending Stage 3A repair",

@@ -208,6 +208,19 @@ def _location_region(location: Any) -> tuple[float, float, float, float] | None:
     return None
 
 
+def _measurement_region(measurement: Any) -> tuple[float, float, float, float] | None:
+    if not isinstance(measurement, dict):
+        return None
+    region = measurement.get("region")
+    if (
+        isinstance(region, (list, tuple))
+        and len(region) == 4
+        and all(_finite(value) for value in region)
+    ):
+        return tuple(float(value) for value in region)
+    return None
+
+
 def _validation_key(finding: dict[str, Any]) -> tuple[str, ...]:
     return (
         str(finding.get("severity", "")),
@@ -241,13 +254,20 @@ def build_reviewed_drawing(
         expected_id = raw_issue.get("reference_entity_id")
         actual = student_by_id.get(str(source_id)) if source_id is not None else None
         expected = reference_by_id.get(str(expected_id)) if expected_id is not None else None
-        region = _union_regions(expected.bbox if expected else None, actual.bbox if actual else None, _location_region(raw_issue.get("location")))
+        visual_role = _role(category, severity)
+        if visual_role == "connectivity":
+            region = _union_regions(
+                _measurement_region(raw_issue.get("measurement")),
+                _location_region(raw_issue.get("location")),
+            )
+        else:
+            region = _union_regions(expected.bbox if expected else None, actual.bbox if actual else None, _location_region(raw_issue.get("location")))
         raw_deduction, applied_deduction, deduction_status, suppression_reason = _deduction_contract(raw_issue)
         reviewed_issues.append(ReviewedIssue(
             issue_id=issue_id,
             category=category,
             severity=severity,
-            visual_role=_role(category, severity),
+            visual_role=visual_role,
             source_entity_id=str(source_id) if source_id is not None else None,
             expected_entity_id=str(expected_id) if expected_id is not None else None,
             actual_geometry=actual,

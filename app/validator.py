@@ -2,6 +2,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from .dxf import entity_length
 from .models import Drawing, Entity
+from .topology import build_topology
 
 def _finding(code: str, severity: str, message: str, entity: Entity | None = None) -> dict:
     return {
@@ -27,14 +28,12 @@ def validate_reference(drawing: Drawing) -> dict:
             "entity_id": None, "location": None, "source_handle": unsupported.get("handle"),
         })
     signatures: dict[tuple, list[Entity]] = defaultdict(list)
-    endpoints: Counter[tuple[float, float]] = Counter()
     for entity in drawing.entities:
         signatures[_signature(entity)].append(entity)
         if entity.kind == "line":
             length = entity_length(entity)
             if length is not None and length <= 1e-9:
                 findings.append(_finding("zero_length", "critical", "A zero-length line makes the reference invalid.", entity))
-            endpoints.update(entity.points)
         if entity.kind in {"circle", "arc"} and (entity.radius is None or entity.radius <= 0):
             findings.append(_finding("zero_radius", "critical", "A circle or arc has a non-positive radius.", entity))
         if entity.kind == "polyline" and not entity.closed:
@@ -42,13 +41,7 @@ def validate_reference(drawing: Drawing) -> dict:
     for group in signatures.values():
         for duplicate in group[1:]:
             findings.append(_finding("duplicate_geometry", "warning", "Duplicate reference geometry may cause unfair grading.", duplicate))
-    dangling = [point for point, count in endpoints.items() if count == 1]
-    if dangling:
-        findings.append({
-            "code": "disconnected_boundary", "severity": "warning",
-            "message": f"{len(dangling)} line endpoint(s) are not connected to another line.",
-            "entity_id": None, "location": dangling[0],
-        })
+    topology = build_topology(drawing)
     width = drawing.bbox[2] - drawing.bbox[0]
     height = drawing.bbox[3] - drawing.bbox[1]
     if max(abs(v) for v in drawing.bbox) > 1_000_000 or max(width, height) > 1_000_000:
@@ -64,4 +57,5 @@ def validate_reference(drawing: Drawing) -> dict:
         "requires_acknowledgement": warnings > 0,
         "summary": {"critical": critical, "warnings": warnings, "supported_entities": len(drawing.entities), "unsupported_entities": len(drawing.unsupported_entities)},
         "findings": findings,
+        "topology": topology.to_dict(),
     }

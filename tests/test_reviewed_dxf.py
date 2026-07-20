@@ -97,6 +97,36 @@ def test_review_model_preserves_missing_extra_and_inaccurate_provenance():
 
 
 
+def test_connectivity_issue_uses_local_region_and_selectable_svg_id():
+    reference = drawing(
+        [entity("R-L", "line", [(10, 0), (10, 10)])], (10, 0, 10, 10)
+    )
+    student = drawing(
+        [entity("S-L", "line", [(10, 5), (10, 10)], source="student")],
+        (10, 5, 10, 10),
+    )
+    raw_issue = issue(
+        "T-GAP-STABLE",
+        "endpoint_gap",
+        reference_id="R-L",
+        student_id="S-L",
+        deduction=0,
+    )
+    raw_issue["location"] = [10, 0]
+    raw_issue["measurement"] = {
+        "property": "endpoint_gap", "expected": 0, "actual": 5,
+        "region": [10, 0, 10, 5],
+    }
+    reviewed = build_reviewed_drawing(reference, student, {"issues": [raw_issue]})
+    topology_issue = reviewed.issues[0]
+    svg = render_svg(reviewed)
+
+    assert topology_issue.visual_role == "connectivity"
+    assert topology_issue.region == (10, 0, 10, 5)
+    assert 'data-issue-id="T-GAP-STABLE"' in svg
+    assert 'data-role="connectivity"' in svg
+
+
 def test_review_model_distinguishes_raw_applied_and_suppressed_deductions():
     reference = drawing([entity("R-M", "line", [(0, 0), (10, 0)])], (0, 0, 10, 0))
     raw_issue = issue("E-001", "missing_geometry", reference_id="R-M", deduction=5)

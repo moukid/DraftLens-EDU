@@ -136,9 +136,9 @@ def _issue_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> list[str
             parts.append(_entity_svg(issue.actual_geometry, "inaccurate-actual", transform, "-actual"))
         output.append(f'<g {issue_attr} data-role="inaccurate">{"".join(parts)}</g>')
     elif issue.visual_role == "connectivity":
-        geometry = issue.actual_geometry or issue.expected_geometry
-        if geometry:
-            output.append(f'<g {issue_attr} data-role="connectivity">{_entity_svg(geometry, "connectivity", transform, "-connectivity")}</g>')
+        region = _region_svg(issue, transform)
+        if region:
+            output.append(f'<g {issue_attr} data-role="connectivity">{region}</g>')
     else:
         region = _region_svg(issue, transform)
         if region:

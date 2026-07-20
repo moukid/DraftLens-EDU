@@ -496,7 +496,9 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         reference_entity = finding.reference_entity
         student_entity = finding.student_entity
         location_entity = reference_entity or student_entity
-        location = _center(location_entity) if location_entity is not None else None
+        location = finding.location or (
+            _center(location_entity) if location_entity is not None else None
+        )
         measurement = deepcopy(finding.measurement)
         action = {
             "missing_geometry": "Add the required geometry at the ghosted location.",
@@ -509,6 +511,7 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
             "open_polyline": "Close the required boundary.",
             "duplicate_geometry": "Remove the coincident duplicate entity.",
             "unsupported_entity": "Review this unsupported entity manually.",
+            "endpoint_gap": "Restore the expected endpoint connection at this junction.",
         }.get(finding.category, "Review this finding.")
         if (
             finding.category
@@ -537,7 +540,7 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
             )
         issues.append(
             Issue(
-                id=f"E-{len(issues) + 1:03d}",
+                id=finding.issue_id or f"E-{len(issues) + 1:03d}",
                 category=finding.category,
                 code=_legacy_code(
                     finding.category, reference_entity, student_entity
@@ -566,6 +569,23 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
 
     for finding in analysis.findings:
         add(finding)
+
+    for issue in issues:
+        if issue.category != "endpoint_gap" or issue.measurement is None:
+            continue
+        primary_issue = next(
+            (
+                candidate
+                for candidate in issues
+                if candidate.classification == "primary"
+                and candidate.reference_entity_id == issue.reference_entity_id
+                and candidate.student_entity_id == issue.student_entity_id
+            ),
+            None,
+        )
+        issue.measurement["linked_primary_issue_id"] = (
+            primary_issue.id if primary_issue else None
+        )
 
     def resolve_suppressed(raw: dict[str, Any]) -> dict[str, Any]:
         resolved = deepcopy(raw)
@@ -643,6 +663,7 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
             observation.to_dict() for observation in analysis.observations
         ],
         "suppressed_findings": suppressed_findings,
+        "topology": analysis.topology.to_dict() if analysis.topology else None,
         "score_breakdown": scoring["score_breakdown"],
         "tolerances": tolerance.model_dump(),
         "rubric_application": {
