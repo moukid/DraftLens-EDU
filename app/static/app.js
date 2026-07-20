@@ -13,6 +13,7 @@ const state = {
   review: null,
   selectedIssueId: null,
   filter: "all",
+  viewMode: "review",
   loading: false,
 };
 
@@ -29,6 +30,8 @@ const approveButton = byId("approve-rubric");
 const reviewButton = byId("run-review");
 const downloadReportButton = byId("download-report");
 const metadataInputs = [byId("student-metadata-name"), byId("student-metadata-id"), byId("course-section")];
+const viewReviewButton = byId("view-review-comparison");
+const viewStudentButton = byId("view-student-only");
 
 
 referenceInput.addEventListener("change", () => inspectReference(referenceInput.files[0] || null));
@@ -82,9 +85,12 @@ document.querySelectorAll("[data-filter]").forEach((button) => {
   button.addEventListener("click", () => setFilter(button.dataset.filter));
 });
 byId("drawing-viewport").addEventListener("click", (event) => {
+  if (state.viewMode === "student") return;
   const visual = event.target.closest("[data-issue-id]");
   if (visual) selectIssue(visual.getAttribute("data-issue-id"), true);
 });
+viewReviewButton.addEventListener("click", () => setDrawingViewMode("review"));
+viewStudentButton.addEventListener("click", () => setDrawingViewMode("student"));
 
 function uploadForm(field, file) {
   const form = new FormData();
@@ -178,6 +184,7 @@ function hideError() {
 function resetReview() {
   state.review = null;
   state.filter = "all";
+  setDrawingViewMode("review");
   resetNormalizationDecision();
   downloadReportButton.disabled = true;
   byId("report-status").textContent = "Generate a review to enable its authoritative report.";
@@ -193,6 +200,16 @@ function resetReview() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+}
+
+function setDrawingViewMode(mode) {
+  const studentOnly = mode === "student";
+  state.viewMode = studentOnly ? "student" : "review";
+  byId("drawing-viewport").classList.toggle("student-only-view", studentOnly);
+  viewReviewButton.setAttribute("aria-pressed", String(!studentOnly));
+  viewStudentButton.setAttribute("aria-pressed", String(studentOnly));
+  byId("overlay-legend").hidden = studentOnly;
+  byId("student-only-status").hidden = !studentOnly;
 }
 
 function resetNormalizationDecision() {
@@ -565,6 +582,7 @@ async function runReview() {
 }
 
 function renderResults(review) {
+  setDrawingViewMode("review");
   byId("review-placeholder").hidden = true;
   byId("review-results").hidden = false;
   byId("result-score").textContent = formatNumber(review.score);

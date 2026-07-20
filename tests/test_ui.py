@@ -1,4 +1,6 @@
 from html.parser import HTMLParser
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from fastapi.testclient import TestClient
 
@@ -77,6 +79,11 @@ def test_visual_review_page_exposes_complete_semantic_workflow():
         "result-supporting",
         "result-reference-notes",
         "drawing-viewport",
+        "drawing-view-controls",
+        "view-review-comparison",
+        "view-student-only",
+        "overlay-legend",
+        "student-only-status",
         "issue-list",
         "feedback-detail",
         "api-error",
@@ -354,3 +361,131 @@ def test_optional_metadata_and_authoritative_pdf_download_are_wired():
     metadata_listener = javascript[listener_start:listener_end]
     assert "resetReview();" in metadata_listener
     assert "markRubricDirty();" not in metadata_listener
+
+
+def test_drawing_view_control_defaults_to_review_comparison_with_semantic_state():
+    response, parser = page()
+    control = parser.elements["drawing-view-controls"][1]
+    review = parser.elements["view-review-comparison"][1]
+    student = parser.elements["view-student-only"][1]
+    status = parser.elements["student-only-status"][1]
+
+    assert control["role"] == "group"
+    assert control["aria-label"] == "Drawing view"
+    assert review["type"] == student["type"] == "button"
+    assert review["aria-controls"] == student["aria-controls"] == "drawing-viewport"
+    assert review["aria-pressed"] == "true"
+    assert student["aria-pressed"] == "false"
+    assert "hidden" not in parser.elements["overlay-legend"][1]
+    assert "hidden" in status
+    assert "Review comparison" in response.text
+    assert "Student only" in response.text
+    assert "Student submission only &mdash; DraftLens overlays are hidden." in response.text
+
+
+def test_student_only_view_hides_overlay_roles_but_not_original_student_layer():
+    stylesheet = client.get("/static/style.css").text
+    javascript = client.get("/static/app.js").text
+    mode_css = stylesheet[
+        stylesheet.index('.drawing-viewport.student-only-view svg [data-layer="reference"]'):
+        stylesheet.index(".drawing-viewport [data-issue-id]")
+    ]
+    mode_function = javascript[
+        javascript.index("function setDrawingViewMode"):
+        javascript.index("function resetNormalizationDecision")
+    ]
+
+    assert '[data-layer="reference"]' in mode_css
+    assert '[data-layer="issues"]' in mode_css
+    assert '[data-layer="student"]' not in mode_css
+    assert "display: none" in mode_css
+    assert 'classList.toggle("student-only-view", studentOnly)' in mode_function
+    assert 'byId("overlay-legend").hidden = studentOnly' in mode_function
+    assert 'byId("student-only-status").hidden = !studentOnly' in mode_function
+    assert 'viewReviewButton.setAttribute("aria-pressed", String(!studentOnly))' in mode_function
+    assert 'viewStudentButton.setAttribute("aria-pressed", String(studentOnly))' in mode_function
+
+
+def test_student_only_toggle_is_constant_time_and_preserves_review_and_selection():
+    javascript = client.get("/static/app.js").text
+    mode_function = javascript[
+        javascript.index("function setDrawingViewMode"):
+        javascript.index("function resetNormalizationDecision")
+    ]
+    reset_review = javascript[
+        javascript.index("function resetReview"):
+        javascript.index("function setDrawingViewMode")
+    ]
+    render_results = javascript[
+        javascript.index("function renderResults"):
+        javascript.index("function formatTranslation")
+    ]
+    viewport_listener = javascript[
+        javascript.index('byId("drawing-viewport").addEventListener'):
+        javascript.index("function uploadForm")
+    ]
+
+    for forbidden in ("fetch(", "requestJson(", "renderSafeSvg(", "replaceChildren(", "querySelectorAll("):
+        assert forbidden not in mode_function
+    assert "state.review =" not in mode_function
+    assert "state.selectedIssueId =" not in mode_function
+    assert "review_id" not in mode_function
+    assert "report_available" not in mode_function
+    assert "score" not in mode_function
+    assert 'setDrawingViewMode("review");' in reset_review
+    assert 'setDrawingViewMode("review");' in render_results
+    assert 'if (state.viewMode === "student") return;' in viewport_listener
+    assert 'setDrawingViewMode("student")' in viewport_listener
+
+    select_student = javascript[
+        javascript.index("function selectStudent"):
+        javascript.index("function canRunReview")
+    ]
+    reset_reference = javascript[
+        javascript.index("function resetReferenceDependentState"):
+        javascript.index("async function inspectReference")
+    ]
+    assert "resetReview();" in select_student
+    assert "resetReview();" in reset_reference
+
+
+def test_translation_review_svg_keeps_student_geometry_in_submitted_coordinates():
+    fixtures = Path(__file__).parent / "fixtures" / "simple_audit-II"
+    reference_path = fixtures / "01-ARC-Reference.dxf"
+    student_path = fixtures / "01-ARC-All-Moved.dxf"
+    with reference_path.open("rb") as reference:
+        suggestion_response = client.post(
+            "/api/rubric/suggest",
+            files={"reference": ("reference.dxf", reference, "application/dxf")},
+        )
+    assert suggestion_response.status_code == 200
+    suggestion = suggestion_response.json()
+    rubric = suggestion["rubric"]
+    rubric["normalization_mode"] = "translation"
+    rubric["assignment_type"] = suggestion["suggested_assignment_type"]
+    approval = client.post(
+        "/api/rubric/approve",
+        json={"reference_id": suggestion["reference_id"], "rubric": rubric},
+    )
+    assert approval.status_code == 200
+    with reference_path.open("rb") as reference, student_path.open("rb") as student:
+        review_response = client.post(
+            "/api/review",
+            data={"rubric_id": approval.json()["rubric_id"]},
+            files={
+                "reference": ("reference.dxf", reference, "application/dxf"),
+                "student": ("student.dxf", student, "application/dxf"),
+            },
+        )
+    assert review_response.status_code == 200
+    body = review_response.json()
+    assert body["score"] == 100
+    assert body["normalization_decision"]["transform_applied"] is True
+
+    root = ET.fromstring(body["svg"])
+    layers = {group.attrib.get("data-layer"): group for group in root.findall("{http://www.w3.org/2000/svg}g")}
+    reference_paths = [item.attrib["d"] for item in layers["reference"].iter("{http://www.w3.org/2000/svg}path")]
+    student_paths = [item.attrib["d"] for item in layers["student"].iter("{http://www.w3.org/2000/svg}path")]
+    assert reference_paths
+    assert student_paths
+    assert reference_paths != student_paths

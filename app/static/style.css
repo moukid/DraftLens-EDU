@@ -391,6 +391,37 @@ fieldset legend { padding: 0 4px; }
   gap: 14px;
 }
 .panel-heading h2 { margin: 0; }
+.drawing-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.view-mode-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+.view-mode-control > span {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+.view-mode-control button {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 800;
+}
+.view-mode-control button[aria-pressed="true"] { background: var(--charcoal); color: white; }
 .critical-summary {
   margin: 0;
   padding: 5px 8px;
@@ -413,6 +444,10 @@ fieldset legend { padding: 0 4px; }
   background-size: 24px 24px;
 }
 .drawing-viewport svg { display: block; width: 100%; height: 100%; }
+.drawing-viewport.student-only-view svg [data-layer="reference"],
+.drawing-viewport.student-only-view svg [data-layer="issues"] {
+  display: none;
+}
 .drawing-viewport [data-issue-id] { cursor: pointer; }
 .drawing-viewport g[data-issue-id].is-selected > *,
 .drawing-viewport [data-issue-id].is-selected {
@@ -450,6 +485,17 @@ fieldset legend { padding: 0 4px; }
 .legend-connectivity::before { border-color: var(--magenta) !important; }
 .legend-warning::before { border-color: var(--yellow) !important; border-top-style: dotted !important; }
 .legend-critical::before { border-color: var(--red) !important; border-top-width: 5px !important; }
+.student-only-status {
+  min-height: 42px;
+  margin: 0;
+  padding: 12px 15px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
 
 .review-detail-grid {
   display: grid;
@@ -591,6 +637,7 @@ footer {
   .normalization-card { grid-template-columns: 1fr; gap: 12px; }
   .drawing-viewport { min-height: 440px; height: 52vh; }
   .review-detail-grid { grid-template-columns: 1fr; }
+  .drawing-panel-heading { align-items: flex-start; }
 }
 
 @media (max-width: 860px) {
@@ -608,6 +655,10 @@ footer {
   .workspace { padding: 10px; }
   .tolerance-grid { grid-template-columns: repeat(2, 1fr); }
   .results-bar, .panel-heading { padding: 13px; }
+  .drawing-panel-heading { align-items: stretch; flex-direction: column; }
+  .drawing-heading-actions { justify-content: space-between; }
+  .view-mode-control { align-self: stretch; }
+  .view-mode-control button { flex: 1; }
   .drawing-viewport { min-height: 300px; }
   .legend { gap: 8px 12px; }
   .evidence-list div { grid-template-columns: 90px minmax(0, 1fr); }

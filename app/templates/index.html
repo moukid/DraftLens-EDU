@@ -180,14 +180,25 @@
         </section>
 
         <section class="drawing-panel" aria-labelledby="drawing-heading">
-          <div class="panel-heading"><div><p class="eyebrow">Expected vs actual</p><h2 id="drawing-heading">Reviewed drawing</h2></div><p id="critical-summary" class="critical-summary"></p></div>
+          <div class="panel-heading drawing-panel-heading">
+            <div><p class="eyebrow">Expected vs actual</p><h2 id="drawing-heading">Reviewed drawing</h2></div>
+            <div class="drawing-heading-actions">
+              <p id="critical-summary" class="critical-summary"></p>
+              <div id="drawing-view-controls" class="view-mode-control" role="group" aria-label="Drawing view">
+                <span>View:</span>
+                <button id="view-review-comparison" type="button" aria-controls="drawing-viewport" aria-pressed="true">Review comparison</button>
+                <button id="view-student-only" type="button" aria-controls="drawing-viewport" aria-pressed="false">Student only</button>
+              </div>
+            </div>
+          </div>
           <div id="drawing-viewport" class="drawing-viewport" aria-live="polite"></div>
-          <ul class="legend" aria-label="Drawing legend">
+          <ul id="overlay-legend" class="legend" aria-label="Drawing legend">
             <li class="legend-reference">Reference</li><li class="legend-student">Student</li>
             <li class="legend-missing">Missing</li><li class="legend-extra">Extra</li>
             <li class="legend-inaccurate">Inaccurate</li><li class="legend-connectivity">Connectivity</li>
             <li class="legend-warning">Warning</li><li class="legend-critical">Critical</li>
           </ul>
+          <p id="student-only-status" class="student-only-status" hidden>Student submission only &mdash; DraftLens overlays are hidden.</p>
         </section>
 
         <div class="review-detail-grid">
