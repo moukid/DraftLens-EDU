@@ -5,6 +5,7 @@ const state = {
   student: null,
   referenceId: null,
   referenceCanContinue: false,
+  suggestedAssignmentType: null,
   provisionalRubric: null,
   rubricId: null,
   review: null,
@@ -19,6 +20,7 @@ const studentInput = byId("student-file");
 const fallbackInput = byId("fallback-mode");
 const completionPolicyInput = byId("completion-scoring-mode");
 const normalizationModeInput = byId("normalization-mode");
+const assignmentTypeInput = byId("assignment-type");
 const ruleBasedOption = completionPolicyInput.querySelector('option[value="rule_based"]');
 ruleBasedOption.textContent = "Rule-based completion";
 const approveButton = byId("approve-rubric");
@@ -39,6 +41,11 @@ normalizationModeInput.addEventListener("change", () => {
   if (!state.provisionalRubric) return;
   state.provisionalRubric.normalization_mode = normalizationModeInput.value;
   renderNormalizationPolicySummary(normalizationModeInput.value);
+  markRubricDirty();
+});
+assignmentTypeInput.addEventListener("change", () => {
+  if (!state.provisionalRubric) return;
+  state.provisionalRubric.assignment_type = assignmentTypeInput.value;
   markRubricDirty();
 });
 byId("rubric-name").addEventListener("input", (event) => {
@@ -105,6 +112,7 @@ function setLoading(loading, message) {
   fallbackInput.disabled = loading || Boolean(state.rubricId);
   completionPolicyInput.disabled = loading || Boolean(state.rubricId);
   normalizationModeInput.disabled = loading;
+  assignmentTypeInput.disabled = loading;
   reviewButton.textContent = loading && message === "review" ? "Generating review…" : "Generate visual review";
   approveButton.textContent = loading && message === "approval" ? "Approving…" : "Approve rubric";
   updateWeightTotal();
@@ -212,6 +220,7 @@ function resetCorrectionGuidance() {
 function resetReferenceDependentState() {
   state.referenceId = null;
   state.referenceCanContinue = false;
+  state.suggestedAssignmentType = null;
   state.provisionalRubric = null;
   state.rubricId = null;
   state.student = null;
@@ -221,6 +230,7 @@ function resetReferenceDependentState() {
   fallbackInput.disabled = false;
   completionPolicyInput.disabled = false;
   normalizationModeInput.disabled = false;
+  assignmentTypeInput.disabled = false;
   byId("completion-policy-summary").textContent = "";
   byId("normalization-policy-summary").textContent = "";
   byId("analysis-summary").hidden = true;
@@ -259,6 +269,7 @@ async function inspectReference(file) {
     const validation = validationResponse.validation;
     state.referenceId = suggestion.reference_id;
     state.referenceCanContinue = Boolean(validation.can_continue);
+    state.suggestedAssignmentType = suggestion.suggested_assignment_type || analysis.suggested_assignment_type;
     state.provisionalRubric = JSON.parse(JSON.stringify(suggestion.rubric));
     renderValidation(validation);
     renderAnalysis(analysis, validation);
@@ -295,7 +306,7 @@ function renderValidation(validation) {
 
 function renderAnalysis(analysis, validation) {
   byId("analysis-summary").hidden = false;
-  byId("analysis-type").textContent = humanize(analysis.likely_assignment_type);
+  byId("analysis-type").textContent = analysis.suggested_assignment_type || humanize(analysis.likely_assignment_type);
   byId("analysis-entities").textContent = String(
     Object.values(analysis.entity_counts || {}).reduce((total, count) => total + Number(count || 0), 0)
   );
@@ -319,6 +330,9 @@ function renderRubricEditor() {
   byId("rubric-empty").hidden = true;
   byId("rubric-editor").hidden = false;
   byId("rubric-name").value = rubric.title || "";
+  assignmentTypeInput.value = rubric.assignment_type || state.suggestedAssignmentType || "Geometric Construction Exercise";
+  rubric.assignment_type = assignmentTypeInput.value;
+  assignmentTypeInput.disabled = state.loading;
   normalizationModeInput.value = rubric.normalization_mode || "strict";
   normalizationModeInput.disabled = state.loading;
   renderNormalizationPolicySummary(normalizationModeInput.value);
@@ -403,8 +417,9 @@ function updateWeightTotal() {
   const display = byId("weight-total");
   display.textContent = formatNumber(total) + "%";
   const valid = Math.abs(total - 100) <= 0.001;
+  const assignmentTypeConfirmed = Boolean(assignmentTypeInput.value);
   display.classList.toggle("invalid", !valid);
-  approveButton.disabled = state.loading || !state.provisionalRubric || !state.referenceCanContinue || !valid;
+  approveButton.disabled = state.loading || !state.provisionalRubric || !state.referenceCanContinue || !valid || !assignmentTypeConfirmed;
 }
 
 function markRubricDirty() {
@@ -413,6 +428,7 @@ function markRubricDirty() {
     fallbackInput.disabled = false;
     completionPolicyInput.disabled = false;
     normalizationModeInput.disabled = false;
+    assignmentTypeInput.disabled = false;
   }
   if (state.provisionalRubric) state.provisionalRubric.approved = false;
   byId("rubric-status").textContent = "Changes require instructor approval.";
@@ -437,7 +453,8 @@ async function approveRubric() {
     fallbackInput.disabled = true;
     completionPolicyInput.disabled = true;
     normalizationModeInput.disabled = false;
-    byId("rubric-status").textContent = "Approved and associated. Placement: " + placementModeLabel(state.provisionalRubric.normalization_mode) + ". Completion policy: " + completionPolicyLabel(state.provisionalRubric.completion_scoring_mode) + ".";
+    assignmentTypeInput.disabled = false;
+    byId("rubric-status").textContent = "Approved and associated. Assignment type: " + state.provisionalRubric.assignment_type + ". Placement: " + placementModeLabel(state.provisionalRubric.normalization_mode) + ". Completion policy: " + completionPolicyLabel(state.provisionalRubric.completion_scoring_mode) + ".";
     setWorkflowStatus("Rubric approved — add student drawing", "success");
   } catch (error) {
     showError(error);
@@ -499,6 +516,8 @@ function renderResults(review) {
   byId("review-results").hidden = false;
   byId("result-score").textContent = formatNumber(review.score);
   byId("result-units").textContent = review.units || "unitless";
+  byId("result-assignment-type").textContent = review.assignment_type || (review.rubric && review.rubric.assignment_type) || "Not confirmed";
+  byId("result-detected-features").textContent = (review.detected_features || []).join(", ") || "No repeated structural features detected";
   const counts = findingCounts(review);
   byId("result-issues").textContent = String(counts.primary_student_issues);
   byId("result-supporting").textContent = String(counts.supporting_findings);

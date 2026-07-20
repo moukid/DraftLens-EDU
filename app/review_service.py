@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 from typing import Any, Mapping
 
+from .analysis import analyze_assignment
 from .compare import compare_drawings
 from .dxf import parse_dxf_bytes
 from .models import Drawing
@@ -31,6 +32,7 @@ class GradingPipelineOutput:
     reference: Drawing
     student: Drawing
     validation: dict[str, Any]
+    analysis: dict[str, Any]
     comparison: dict[str, Any]
 
     @property
@@ -93,6 +95,7 @@ def run_grading_pipeline(
     reference = parse_dxf_bytes(reference_bytes, source="reference", normalize=normalize)
     student = parse_dxf_bytes(student_bytes, source="student", normalize=normalize)
     validation = validate_reference(reference)
+    assignment_analysis = analyze_assignment(reference)
     comparison = compare_drawings(reference, student, rubric=selected_rubric)
     return GradingPipelineOutput(
         reference_id=reference_id,
@@ -102,6 +105,7 @@ def run_grading_pipeline(
         reference=reference,
         student=student,
         validation=validation,
+        analysis=assignment_analysis,
         comparison=comparison,
     )
 
@@ -222,6 +226,9 @@ def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
         "rubric": output.rubric.model_dump(),
+        "suggested_assignment_type": output.analysis["suggested_assignment_type"],
+        "assignment_type": output.rubric.assignment_type,
+        "detected_features": output.analysis["detected_features"],
         "completion_scoring_mode": output.rubric.completion_scoring_mode,
         "normalization_mode": output.rubric.normalization_mode,
         "normalization_decision": normalization_decision(output),

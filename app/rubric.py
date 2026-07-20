@@ -2,6 +2,17 @@ from __future__ import annotations
 from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
+AssignmentType = Literal[
+    "Geometric Construction Exercise",
+    "Mixed Geometric Composition",
+    "Geometric Pattern",
+    "Islamic Geometric Pattern",
+    "Interior Plan",
+    "Architectural Drawing",
+    "Technical Drawing",
+    "Other",
+]
+
 class ToleranceProfile(BaseModel):
     position: float = Field(2.0, ge=0)
     length: float = Field(1.0, ge=0)
@@ -29,6 +40,7 @@ class RubricCategory(BaseModel):
 class Rubric(BaseModel):
     title: str = "DraftLens assignment rubric"
     approved: bool = False
+    assignment_type: AssignmentType | None = None
     categories: list[RubricCategory]
     tolerances: ToleranceProfile = Field(default_factory=ToleranceProfile)
     normalization_mode: Literal["strict", "translation", "translation_rotation", "instructor_defined"] = "translation"

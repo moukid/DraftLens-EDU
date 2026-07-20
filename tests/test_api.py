@@ -34,10 +34,14 @@ def test_rubric_suggestion_requires_approval_and_can_be_approved():
  assert suggestion.status_code==200
  body=suggestion.json()
  assert body["provisional"] is True and body["rubric"]["approved"] is False
+ assert body["suggested_assignment_type"] in {"Mixed Geometric Composition","Geometric Construction Exercise"}
+ assert body["assignment_type"] is None and body["rubric"]["assignment_type"] is None
  assert body["completion_scoring_mode"]==body["rubric"]["completion_scoring_mode"]=="rule_based"
+ body["rubric"]["assignment_type"]=body["suggested_assignment_type"]
  approved=client.post("/api/rubric/approve",json={"reference_id":body["reference_id"],"rubric":body["rubric"]})
  assert approved.status_code==200
  assert approved.json()["rubric"]["approved"] is True
+ assert approved.json()["assignment_type"]==body["suggested_assignment_type"]
  assert approved.json()["completion_scoring_mode"]=="rule_based"
 
 def test_reference_validation_rejects_invalid_dxf_cleanly():
@@ -50,6 +54,7 @@ def _review_approve(reference_path=S/"reference.dxf",completion_mode=None):
   suggestion=client.post("/api/rubric/suggest",files={"reference":("reference.dxf",source,"application/dxf")}).json()
  if completion_mode is not None:
   suggestion["rubric"]["completion_scoring_mode"]=completion_mode
+ suggestion["rubric"]["assignment_type"]=suggestion["rubric"].get("assignment_type") or suggestion["suggested_assignment_type"]
  approval=client.post("/api/rubric/approve",json={"reference_id":suggestion["reference_id"],"rubric":suggestion["rubric"]})
  assert approval.status_code==200
  return suggestion,approval.json()
@@ -81,6 +86,18 @@ def _document_bytes(*,text=None,unsupported=False,units=ezdxf.units.MM):
  document.write(stream)
  return stream.getvalue().encode("utf-8")
 
+def _abstract_document_bytes():
+ document=ezdxf.new("R2010")
+ document.units=ezdxf.units.CM
+ modelspace=document.modelspace()
+ for index in range(32):
+  modelspace.add_line((0,index),(20,index))
+ for index in range(8):
+  modelspace.add_circle((index*15,50),radius=5+index%2)
+ stream=io.StringIO()
+ document.write(stream)
+ return stream.getvalue().encode("utf-8")
+
 def _all_strings(value):
  if isinstance(value,str):
   yield value
@@ -91,6 +108,45 @@ def _all_strings(value):
  elif isinstance(value,list):
   for item in value:
    yield from _all_strings(item)
+
+def test_abstract_assignment_suggestion_is_neutral_and_deterministic():
+ document=_abstract_document_bytes()
+ files={"reference":("abstract.dxf",document,"application/dxf")}
+ first=client.post("/api/rubric/suggest",files=files)
+ second=client.post("/api/rubric/suggest",files={"reference":("abstract.dxf",document,"application/dxf")})
+ assert first.status_code==second.status_code==200
+ assert first.json()==second.json()
+ body=first.json()
+ assert body["suggested_assignment_type"]=="Mixed Geometric Composition"
+ assert body["assignment_type"] is None
+ assert "Islamic" not in body["suggested_assignment_type"]
+ assert {"radial structure","repeated angles","closed boundaries","mixed geometric primitives"}<=set(body["detected_features"])
+
+def test_rubric_approval_requires_assignment_type_confirmation():
+ document=_abstract_document_bytes()
+ suggestion=client.post("/api/rubric/suggest",files={"reference":("abstract.dxf",document,"application/dxf")}).json()
+ response=client.post("/api/rubric/approve",json={"reference_id":suggestion["reference_id"],"rubric":suggestion["rubric"]})
+ assert response.status_code==422
+ assert "confirmation of the assignment type" in response.json()["detail"]
+
+def test_instructor_confirmed_assignment_type_is_returned_by_review():
+ document=_abstract_document_bytes()
+ suggestion=client.post("/api/rubric/suggest",files={"reference":("abstract.dxf",document,"application/dxf")}).json()
+ suggestion["rubric"]["assignment_type"]="Islamic Geometric Pattern"
+ approval=client.post("/api/rubric/approve",json={"reference_id":suggestion["reference_id"],"rubric":suggestion["rubric"]})
+ assert approval.status_code==200
+ assert approval.json()["assignment_type"]=="Islamic Geometric Pattern"
+ response=client.post("/api/review",files={
+  "reference":("abstract.dxf",document,"application/dxf"),
+  "student":("abstract-exact.dxf",document,"application/dxf"),
+ })
+ assert response.status_code==200
+ body=response.json()
+ assert body["score"]==100
+ assert body["suggested_assignment_type"]=="Mixed Geometric Composition"
+ assert body["assignment_type"]=="Islamic Geometric Pattern"
+ assert body["rubric"]["assignment_type"]=="Islamic Geometric Pattern"
+ assert body["detected_features"]==suggestion["detected_features"]
 
 def test_review_uses_associated_approved_rubric_and_returns_stable_contract():
  _,approval=_review_approve()

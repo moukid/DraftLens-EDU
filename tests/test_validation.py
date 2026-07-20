@@ -5,6 +5,10 @@ from app.validator import validate_reference
 def _line(entity_id, start, end):
     return Entity(id=entity_id, kind="line", layer="0", points=[start, end], bbox=(min(start[0],end[0]),min(start[1],end[1]),max(start[0],end[0]),max(start[1],end[1])), centroid=((start[0]+end[0])/2,(start[1]+end[1])/2))
 
+def _circle(entity_id, center, radius=5):
+    x, y = center
+    return Entity(id=entity_id, kind="circle", layer="0", points=[center], radius=radius, bbox=(x-radius,y-radius,x+radius,y+radius), centroid=center)
+
 def test_reference_validation_reports_units_and_duplicates_but_accepts_terminals():
     first = _line("R-1", (0,0), (10,0))
     duplicate = _line("R-2", (0,0), (10,0))
@@ -40,3 +44,27 @@ def test_assignment_analysis_is_structured_and_deterministic():
     assert result["entity_counts"] == {"LINE": 3}
     assert result["repeated_angles"] == [0.0]
     assert "incorrect_length" in result["suggested_checks"]
+
+def test_abstract_geometry_profile_is_neutral_structural_and_deterministic():
+    entities = [
+        _line(f"R-L{index}", (0,index), (20,index)) for index in range(32)
+    ] + [
+        _circle(f"R-C{index}", (index * 15, 50), 5 + index % 2) for index in range(8)
+    ]
+    drawing = Drawing(entities, (0,0,110,55), units="cm", units_code=5)
+
+    first = analyze_assignment(drawing)
+    second = analyze_assignment(drawing)
+
+    assert first == second
+    assert first["suggested_assignment_type"] == "Mixed Geometric Composition"
+    assert first["assignment_type"] is None
+    assert first["likely_assignment_type"] == first["suggested_assignment_type"]
+    assert first["suggested_assignment_type"] != "Islamic Geometric Pattern"
+    assert {
+        "radial structure",
+        "repeated angles",
+        "closed boundaries",
+        "possible repeated or symmetric structure",
+        "mixed geometric primitives",
+    } <= set(first["detected_features"])

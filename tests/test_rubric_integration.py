@@ -13,6 +13,7 @@ def suggest():
     return response.json()
 
 def approve(suggestion):
+    suggestion["rubric"]["assignment_type"] = suggestion["rubric"].get("assignment_type") or suggestion["suggested_assignment_type"]
     return client.post("/api/rubric/approve", json={"reference_id": suggestion["reference_id"], "rubric": suggestion["rubric"]})
 
 def grade(*, data=None):

@@ -27,6 +27,7 @@ def suggest(reference_path: Path) -> dict:
 def approve(reference_path: Path, mode: str) -> dict:
     suggestion = suggest(reference_path)
     suggestion["rubric"]["normalization_mode"] = mode
+    suggestion["rubric"]["assignment_type"] = suggestion["suggested_assignment_type"]
     response = client.post(
         "/api/rubric/approve",
         json={

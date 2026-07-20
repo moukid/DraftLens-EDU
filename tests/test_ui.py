@@ -45,6 +45,7 @@ def test_visual_review_page_exposes_complete_semantic_workflow():
         "analysis-summary",
         "rubric-editor",
         "rubric-categories",
+        "assignment-type",
         "completion-scoring-mode",
         "completion-policy-summary",
         "normalization-mode",
@@ -65,6 +66,8 @@ def test_visual_review_page_exposes_complete_semantic_workflow():
         "run-review",
         "review-results",
         "result-score",
+        "result-assignment-type",
+        "result-detected-features",
         "result-issues",
         "result-supporting",
         "result-reference-notes",
@@ -213,6 +216,37 @@ def test_normalization_selector_invalidates_approval_and_result_evidence_is_visi
     assert "resetNormalizationDecision();" in javascript
     assert ".normalization-card" in stylesheet
 
+
+def test_assignment_type_is_instructor_confirmed_and_invalidates_approval():
+    response, parser = page()
+    javascript = client.get("/static/app.js").text
+
+    assert parser.elements["assignment-type"][0] == "select"
+    assert "Suggested assignment type" in response.text
+    assert "Detected structure" in response.text
+    for option in (
+        "Geometric Construction Exercise",
+        "Mixed Geometric Composition",
+        "Geometric Pattern",
+        "Islamic Geometric Pattern",
+        "Interior Plan",
+        "Architectural Drawing",
+        "Technical Drawing",
+        "Other",
+    ):
+        assert f'>{option}</option>' in response.text
+    listener = javascript[
+        javascript.index('assignmentTypeInput.addEventListener("change"'):
+        javascript.index('byId("rubric-name").addEventListener')
+    ]
+    assert "state.provisionalRubric.assignment_type = assignmentTypeInput.value" in listener
+    assert "markRubricDirty();" in listener
+    dirty = javascript[javascript.index("function markRubricDirty"):javascript.index("async function approveRubric")]
+    assert "state.rubricId = null" in dirty
+    assert "updateReviewAvailability();" in dirty
+    assert "assignmentTypeInput.disabled = false" in dirty
+    assert 'byId("result-assignment-type").textContent' in javascript
+    assert 'byId("result-detected-features").textContent' in javascript
 
 def test_completion_policy_and_applied_deduction_contract_are_visible():
     response, parser = page()

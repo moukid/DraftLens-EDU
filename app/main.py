@@ -99,6 +99,9 @@ async def grade(
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
         "rubric": output.rubric.model_dump(),
+        "suggested_assignment_type": output.analysis["suggested_assignment_type"],
+        "assignment_type": output.rubric.assignment_type,
+        "detected_features": output.analysis["detected_features"],
         "normalization_mode": output.rubric.normalization_mode,
         "normalization_decision": normalization_decision(output),
     })
@@ -137,12 +140,16 @@ async def assignment_analyze(reference: UploadFile = File(...)):
 async def rubric_suggest(reference: UploadFile = File(...)):
     reference_bytes = await read_upload(reference)
     drawing = parse_dxf_bytes(reference_bytes, source="reference")
+    analysis = analyze_assignment(drawing)
     suggested_rubric = default_rubric(reference.filename or "Assignment rubric").model_copy(
         update={"normalization_mode": "strict"}
     )
     return {
         "reference_id": reference_fingerprint(reference_bytes),
-        "analysis": analyze_assignment(drawing),
+        "analysis": analysis,
+        "suggested_assignment_type": analysis["suggested_assignment_type"],
+        "assignment_type": suggested_rubric.assignment_type,
+        "detected_features": analysis["detected_features"],
         "completion_scoring_mode": suggested_rubric.completion_scoring_mode,
         "normalization_mode": suggested_rubric.normalization_mode,
         "rubric": suggested_rubric.model_dump(),
@@ -152,6 +159,8 @@ async def rubric_suggest(reference: UploadFile = File(...)):
 
 @app.post("/api/rubric/approve")
 def rubric_approve(request: RubricApprovalRequest):
+    if request.rubric.assignment_type is None:
+        raise HTTPException(422, "Instructor confirmation of the assignment type is required before rubric approval.")
     approved = request.rubric.model_copy(update={"approved": True})
     rubric_id = str(uuid.uuid4())
     RUBRICS[rubric_id] = approved
@@ -160,6 +169,7 @@ def rubric_approve(request: RubricApprovalRequest):
     return {
         "rubric_id": rubric_id,
         "reference_id": request.reference_id,
+        "assignment_type": approved.assignment_type,
         "completion_scoring_mode": approved.completion_scoring_mode,
         "normalization_mode": approved.normalization_mode,
         "rubric": approved.model_dump(),

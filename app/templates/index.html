@@ -29,12 +29,12 @@
         <p id="validation-message" class="supporting-text">Upload a reference to inspect entities, extents, and validation findings.</p>
         <div id="analysis-summary" class="analysis-summary" hidden>
           <dl class="metric-grid">
-            <div><dt>Type</dt><dd id="analysis-type">—</dd></div>
+            <div><dt>Suggested assignment type</dt><dd id="analysis-type">—</dd></div>
             <div><dt>Entities</dt><dd id="analysis-entities">—</dd></div>
             <div><dt>Warnings</dt><dd id="analysis-warnings">—</dd></div>
             <div><dt>Critical</dt><dd id="analysis-critical">—</dd></div>
           </dl>
-          <div><h2>Detected features</h2><ul id="analysis-features" class="compact-list"></ul></div>
+          <div><h2>Detected structure</h2><ul id="analysis-features" class="compact-list"></ul></div>
         </div>
       </section>
 
@@ -43,6 +43,19 @@
         <p id="rubric-empty" class="empty-copy">Analyze a reference to generate a provisional rubric.</p>
         <div id="rubric-editor" hidden>
           <label class="field">Rubric name<input id="rubric-name" type="text" maxlength="160"></label>
+          <label class="field" for="assignment-type">Assignment type
+            <select id="assignment-type" required>
+              <option value="Geometric Construction Exercise">Geometric Construction Exercise</option>
+              <option value="Mixed Geometric Composition">Mixed Geometric Composition</option>
+              <option value="Geometric Pattern">Geometric Pattern</option>
+              <option value="Islamic Geometric Pattern">Islamic Geometric Pattern</option>
+              <option value="Interior Plan">Interior Plan</option>
+              <option value="Architectural Drawing">Architectural Drawing</option>
+              <option value="Technical Drawing">Technical Drawing</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <p class="policy-summary">Confirm the assignment type before approving the rubric. Geometry analysis supplies only a neutral suggestion.</p>
           <div class="section-label"><span>Category weights</span><strong id="weight-total">0%</strong></div>
           <div id="rubric-categories" class="rubric-categories"></div>
           <fieldset id="placement-policy" class="policy-fieldset">
@@ -107,7 +120,7 @@
 
       <div id="review-results" hidden>
         <section class="results-bar" aria-labelledby="results-heading">
-          <div><p class="eyebrow">Reviewed result</p><h2 id="results-heading">Drawing assessment</h2><p id="result-rubric">—</p></div>
+          <div><p class="eyebrow">Reviewed result</p><h2 id="results-heading">Drawing assessment</h2><p id="result-rubric">—</p><dl class="metric-grid result-context"><div><dt>Assignment type</dt><dd id="result-assignment-type">Not confirmed</dd></div><div><dt>Detected structure</dt><dd id="result-detected-features">Not analyzed</dd></div></dl></div>
           <dl class="result-metrics">
             <div class="score-metric"><dt>Score</dt><dd><strong id="result-score">—</strong><span>/100</span></dd></div>
             <div><dt>Units</dt><dd id="result-units">—</dd></div>
