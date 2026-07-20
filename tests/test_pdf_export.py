@@ -407,3 +407,182 @@ def test_multi_page_issue_report_preserves_every_finding_and_page_number():
     for page_number, page in enumerate(reader.pages, start=1):
         assert f"Page {page_number}" in (page.extract_text() or "")
     assert f"{float(review['score']):g} / 100" in text
+
+
+LEGEND_TITLE = "Drawing overlay legend"
+LEGEND_NOTE = "Drawing issue IDs correspond to the detailed findings on the following pages."
+LEGEND_EXPLANATIONS = {
+    "Reference": "Approved instructor geometry",
+    "Student": "Submitted student geometry",
+    "Missing": "Required reference geometry absent from the submission",
+    "Extra": "Unmatched geometry found only in the submission",
+    "Inaccurate": "Matched geometry outside the approved tolerance",
+    "Connectivity": "Junction, closure, or topology evidence",
+    "Warning": "Non-critical advisory or validation note",
+    "Critical": "Severe validation or assessment condition",
+}
+
+
+def _normalized_page_text(page):
+    return " ".join((page.extract_text() or "").split())
+
+
+def _assert_full_pdf_legend(reader):
+    page_one = _normalized_page_text(reader.pages[0])
+    assert LEGEND_TITLE in page_one
+    assert LEGEND_NOTE in page_one
+    assert page_one.index("Reviewed drawing") < page_one.index(LEGEND_TITLE)
+    legend = page_one[page_one.index(LEGEND_TITLE):page_one.index(LEGEND_NOTE) + len(LEGEND_NOTE)]
+    positions = []
+    for label, explanation in LEGEND_EXPLANATIONS.items():
+        assert legend.count(label) == 1
+        assert explanation in legend
+        positions.append(legend.index(label))
+    assert positions == sorted(positions)
+    assert _image_xobjects(reader) == []
+    for page_number, page in enumerate(reader.pages, start=1):
+        page_text = _normalized_page_text(page)
+        assert "DraftLens EDU - Report" in page_text
+        assert f"Page {page_number}" in page_text
+    return legend
+
+
+@pytest.mark.parametrize(
+    "reference,student,mode,score,primary,page_count,normalization_text",
+    (
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-Student-OK.dxf", "strict", 100, 0, 2, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-TwoOnly-Moved.dxf", "strict", 94, 2, 2, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "strict", 91, 3, 2, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "translation", 100, 0, 2, "transform accepted"),
+        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Student-OK.dxf", "strict", 100, 0, 2, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Gap-3Unit.dxf", "strict", 97, 1, 3, "Strict placement. No transform is permitted or applied."),
+        (SAMPLES / "reference.dxf", SAMPLES / "student_door_window_errors.dxf", "strict", 88, 4, 3, "Strict placement. No transform is permitted or applied."),
+    ),
+)
+def test_full_overlay_legend_is_unconditional_and_preserves_controlled_reports(
+    reference,
+    student,
+    mode,
+    score,
+    primary,
+    page_count,
+    normalization_text,
+):
+    _approve(reference, normalization_mode=mode)
+    review = _review(reference, student).json()
+    response = _pdf(review)
+    reader = _reader(response)
+    assert review["score"] == score
+    assert review["finding_counts"]["primary_student_issues"] == primary
+    assert len(reader.pages) == page_count
+    report_text = _text(reader)
+    assert f"{float(score):g} / 100" in report_text
+    assert normalization_text in report_text
+    assert all(issue["issue_id"] in report_text for issue in review["issues"])
+    _assert_full_pdf_legend(reader)
+
+
+def test_reference_note_report_contains_the_same_complete_legend():
+    document = _unitless_document_bytes()
+    _approve(document, filename="unitless-reference.dxf")
+    review = _review(
+        document,
+        document,
+        reference_filename="unitless-reference.dxf",
+        student_filename="unitless-student.dxf",
+    ).json()
+    assert review["finding_counts"]["reference_validation_notes"] == 1
+    reader = _reader(_pdf(review))
+    assert len(reader.pages) == 2
+    _assert_full_pdf_legend(reader)
+
+
+def test_score_93_presentation_snapshot_has_complete_deterministic_vector_legend():
+    from dataclasses import replace
+    import json
+
+    from app.pdf_report import generate_pdf
+
+    reference = SAMPLES / "reference.dxf"
+    _approve(reference)
+    review = _review(reference, SAMPLES / "student_door_window_errors.dxf").json()
+    snapshot = REVIEW_SNAPSHOTS.get(review["review_id"])
+    response = snapshot.review_response
+    breakdown = snapshot.score_breakdown
+    response["score"] = 93
+    response["score_breakdown"]["final_score"] = 93
+    breakdown["final_score"] = 93
+    encode = lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    combined_snapshot = replace(
+        snapshot,
+        review_id="controlled-combined-score-93",
+        review_response_json=encode(response),
+        score_breakdown_json=encode(breakdown),
+    )
+
+    first = generate_pdf(combined_snapshot)
+    second = generate_pdf(combined_snapshot)
+    assert first == second
+    reader = PdfReader(io.BytesIO(first))
+    assert len(reader.pages) == 3
+    report_text = _text(reader)
+    assert "93 / 100" in report_text
+    assert all(issue["issue_id"] in report_text for issue in review["issues"])
+    _assert_full_pdf_legend(reader)
+
+
+def test_legend_samples_reuse_exact_reviewed_drawing_role_styles():
+    from reportlab.lib import colors
+
+    from app.pdf_report import LegendSampleFlowable, _LEGEND_ENTRIES, _ROLE_STYLE
+
+    class RecordingCanvas:
+        def __init__(self):
+            self.color = None
+            self.width = None
+            self.dash = ()
+            self.marks = []
+
+        def saveState(self):
+            pass
+
+        def restoreState(self):
+            pass
+
+        def setStrokeColor(self, color):
+            self.color = color.hexval()
+
+        def setFillColor(self, _color):
+            pass
+
+        def setLineWidth(self, width):
+            self.width = width
+
+        def setDash(self, dash):
+            self.dash = tuple(dash)
+
+        def line(self, *_coordinates):
+            self.marks.append(("line", self.color, self.width, self.dash))
+
+        def rect(self, *_coordinates, **_options):
+            self.marks.append(("rect", self.color, self.width, self.dash))
+
+    assert tuple(label for _role, label, _explanation in _LEGEND_ENTRIES) == tuple(LEGEND_EXPLANATIONS)
+
+    def expected(role, marker):
+        color, width, dash = _ROLE_STYLE[role]
+        return marker, colors.HexColor(color).hexval(), width, tuple(dash or ())
+
+    for role, _label, _explanation in _LEGEND_ENTRIES:
+        recorder = RecordingCanvas()
+        sample = LegendSampleFlowable(role)
+        sample.canv = recorder
+        sample.draw()
+        if role == "inaccurate":
+            assert recorder.marks == [
+                expected("inaccurate-expected", "line"),
+                expected("inaccurate-actual", "line"),
+            ]
+        else:
+            marker = "rect" if role in {"connectivity", "warning", "critical"} else "line"
+            assert recorder.marks == [expected(role, marker)]

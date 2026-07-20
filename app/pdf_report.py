@@ -18,7 +18,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from reportlab.platypus import CondPageBreak, Flowable, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import CondPageBreak, Flowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .review_snapshot import ReviewSnapshot
 from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue
@@ -110,6 +110,51 @@ _ROLE_STYLE = {
     "connectivity": ("#d53f8c", 2, None), "warning": ("#b7791f", 1.5, (3, 3)), "critical": ("#c53030", 2.2, None),
 }
 
+_LEGEND_ENTRIES = (
+    ("reference", "Reference", "Approved instructor geometry"),
+    ("student", "Student", "Submitted student geometry"),
+    ("missing", "Missing", "Required reference geometry absent from the submission"),
+    ("extra", "Extra", "Unmatched geometry found only in the submission"),
+    ("inaccurate", "Inaccurate", "Matched geometry outside the approved tolerance"),
+    ("connectivity", "Connectivity", "Junction, closure, or topology evidence"),
+    ("warning", "Warning", "Non-critical advisory or validation note"),
+    ("critical", "Critical", "Severe validation or assessment condition"),
+)
+
+
+def _set_role_style(pdf: canvas.Canvas, role: str) -> None:
+    color, width, dash = _ROLE_STYLE[role]
+    pdf.setStrokeColor(colors.HexColor(color))
+    pdf.setFillColor(colors.HexColor(color))
+    pdf.setLineWidth(width)
+    pdf.setDash(dash or [])
+
+
+class LegendSampleFlowable(Flowable):
+    """Compact vector sample using the reviewed drawing's exact role style."""
+
+    def __init__(self, role: str, width: float = 24, height: float = 18):
+        super().__init__()
+        self.role, self.width, self.height = role, float(width), float(height)
+
+    def wrap(self, _available_width: float, _available_height: float) -> tuple[float, float]:
+        return self.width, self.height
+
+    def draw(self) -> None:
+        self.canv.saveState()
+        if self.role == "inaccurate":
+            _set_role_style(self.canv, "inaccurate-expected")
+            self.canv.line(1, self.height * .68, self.width - 1, self.height * .68)
+            _set_role_style(self.canv, "inaccurate-actual")
+            self.canv.line(1, self.height * .32, self.width - 1, self.height * .32)
+        elif self.role in {"connectivity", "warning", "critical"}:
+            _set_role_style(self.canv, self.role)
+            self.canv.rect(2, 3, self.width - 4, self.height - 6, stroke=1, fill=0)
+        else:
+            _set_role_style(self.canv, self.role)
+            self.canv.line(1, self.height / 2, self.width - 1, self.height / 2)
+        self.canv.restoreState()
+
 
 class ReviewedDrawingFlowable(Flowable):
     """ReportLab-vector rendering of the exact immutable reviewed drawing."""
@@ -126,9 +171,7 @@ class ReviewedDrawingFlowable(Flowable):
         return x, self.height - screen_y
 
     def _style(self, role: str) -> None:
-        color, width, dash = _ROLE_STYLE[role]
-        self.canv.setStrokeColor(colors.HexColor(color)); self.canv.setFillColor(colors.HexColor(color))
-        self.canv.setLineWidth(width); self.canv.setDash(dash or [])
+        _set_role_style(self.canv, role)
 
     def _entity(self, entity: ReviewedEntity, role: str, transform: CoordinateTransform) -> None:
         self._style(role)
@@ -193,6 +236,7 @@ def _styles() -> dict[str, ParagraphStyle]:
         "h2": ParagraphStyle("DLH2", parent=sample["Heading2"], fontName=FONT_BOLD, fontSize=10, leading=13, textColor=colors.HexColor("#125c3e"), spaceBefore=6, spaceAfter=3),
         "body": ParagraphStyle("DLBody", parent=sample["BodyText"], fontName=FONT_NAME, fontSize=7.5, leading=10, textColor=colors.HexColor("#24313a")),
         "small": ParagraphStyle("DLSmall", parent=sample["BodyText"], fontName=FONT_NAME, fontSize=6.7, leading=8.5, textColor=colors.HexColor("#51615a")),
+        "legend": ParagraphStyle("DLLegend", parent=sample["BodyText"], fontName=FONT_NAME, fontSize=5.6, leading=6.7, textColor=colors.HexColor("#51615a")),
         "score": ParagraphStyle("DLScore", parent=sample["Title"], fontName=FONT_BOLD, fontSize=27, leading=30, alignment=TA_CENTER, textColor=colors.HexColor("#125c3e")),
     }
 
@@ -209,6 +253,50 @@ def _four_column_table(rows: list[tuple[Any, Any, Any, Any]], styles: dict[str, 
     table = Table(cells, colWidths=[width*.14, width*.36, width*.14, width*.36], splitByRow=1)
     table.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#f4f7f5")),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#d8e0dc")),("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
     return table
+
+
+def _overlay_legend(styles: dict[str, ParagraphStyle], width: float) -> list[Flowable]:
+    column_width = width / 4
+    cells: list[Table] = []
+    for role, label, explanation in _LEGEND_ENTRIES:
+        description = Paragraph(
+            f'<font name="{FONT_BOLD}" size="6.3">{_paragraph_text(label)}</font><br/>{_paragraph_text(explanation)}',
+            styles["legend"],
+        )
+        cell = Table(
+            [[LegendSampleFlowable(role), description]],
+            colWidths=[28, column_width - 34],
+        )
+        cell.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        cells.append(cell)
+    legend = Table(
+        [cells[:4], cells[4:]],
+        colWidths=[column_width] * 4,
+        splitByRow=0,
+    )
+    legend.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f4f7f5")),
+        ("BOX", (0, 0), (-1, -1), .35, colors.HexColor("#cbd5d1")),
+        ("INNERGRID", (0, 0), (-1, -1), .25, colors.HexColor("#d8e0dc")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return [
+        _p("Drawing overlay legend", styles["h2"]),
+        legend,
+        Spacer(1, 2),
+        _p("Drawing issue IDs correspond to the detailed findings on the following pages.", styles["small"]),
+        Spacer(1, 4),
+    ]
 
 
 def _metadata_table(snapshot: ReviewSnapshot, styles: dict[str, ParagraphStyle], width: float) -> Table:
@@ -276,7 +364,8 @@ def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
     breakdown_rows.append([_p("Total",styles["body"]),_p("100",styles["body"]),_p(_number(score),styles["body"]),_p(_number(snapshot.score_breakdown.get("total_applied_deduction",0)),styles["body"])])
     breakdown = Table(breakdown_rows,colWidths=[width*.43,width*.19,width*.19,width*.19],repeatRows=1); breakdown.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,colors.HexColor("#d8e0dc")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#edf3f0")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
     placement = "Placement policy: " + ("Translation-tolerant placement" if response.get("normalization_mode")=="translation" else "Strict placement") + f". Completion policy: {response.get('completion_scoring_mode','rule_based').replace('_',' ')}."
-    story.extend([breakdown,_p("Placement and transform decision",styles["h1"]),_p(placement,styles["body"]),_p(_normalization_summary(snapshot),styles["small"]),_p("Reviewed drawing",styles["h1"]),ReviewedDrawingFlowable(snapshot.reviewed_drawing,width,205),PageBreak(),_p("Finding details",styles["title"]),_p("Findings are grouped by their authoritative role. Supporting and reference findings do not become primary deductions.",styles["subtitle"])])
+    reviewed_section: list[Flowable] = [_p("Reviewed drawing", styles["h1"]), *_overlay_legend(styles, width), ReviewedDrawingFlowable(snapshot.reviewed_drawing, width, 175)]
+    story.extend([breakdown,_p("Placement and transform decision",styles["h1"]),_p(placement,styles["body"]),_p(_normalization_summary(snapshot),styles["small"]),KeepTogether(reviewed_section),PageBreak(),_p("Finding details",styles["title"]),_p("Findings are grouped by their authoritative role. Supporting and reference findings do not become primary deductions.",styles["subtitle"])])
     issues = list(response.get("issues") or [])
     for role, heading in (("primary","Primary issue details"),("supporting","Supporting topology findings"),("reference","Reference notes"),("unsupported","Unsupported findings"),("informational","Informational findings")):
         selected = [issue for issue in issues if issue.get("finding_role")==role]
