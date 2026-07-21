@@ -114,6 +114,7 @@ class ReviewSnapshot:
     student_metadata: StudentMetadata
     approved_rubric_id: str | None
     approved_rubric_json: str
+    assignment_title: str
     assignment_type: str | None
     suggested_assignment_type: str
     detected_features: tuple[str, ...]
@@ -213,6 +214,7 @@ class ReviewSnapshotStore:
         student_metadata: StudentMetadata,
         approved_rubric_id: str | None,
         approved_rubric: dict[str, Any],
+        assignment_title: str,
         assignment_type: str | None,
         suggested_assignment_type: str,
         detected_features: list[str] | tuple[str, ...],
@@ -255,6 +257,7 @@ class ReviewSnapshotStore:
             student_metadata=student_metadata,
             approved_rubric_id=approved_rubric_id,
             approved_rubric_json=_json(approved_rubric),
+            assignment_title=str(assignment_title),
             assignment_type=assignment_type,
             suggested_assignment_type=str(suggested_assignment_type),
             detected_features=tuple(str(item) for item in detected_features),

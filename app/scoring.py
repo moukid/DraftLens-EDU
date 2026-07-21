@@ -92,7 +92,11 @@ def score_issues(
         pair = rules.get(issue.category)
         rule = pair[0] if pair else None
         category = pair[1] if pair else None
-        raw = float(rule.deduction if rule else 0.0)
+        raw = float(
+            issue.deduction
+            if issue.category == "global_drawing_displacement" and rule
+            else rule.deduction if rule else 0.0
+        )
         issue.deduction = raw
         issue.rubric_rule_id = rule.id if rule else None
         issue.score_category = category.id if category else None

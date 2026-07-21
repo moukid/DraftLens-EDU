@@ -46,7 +46,7 @@ referenceInput.addEventListener("change", () => inspectReference(referenceInput.
 studentInput.addEventListener("change", () => selectStudent(studentInput.files[0] || null));
 fallbackInput.addEventListener("change", updateReviewAvailability);
 approveButton.addEventListener("click", approveRubric);
-reviewButton.addEventListener("click", runReview);
+reviewButton.addEventListener("click", () => runReview(false));
 downloadReportButton.addEventListener("click", downloadReport);
 metadataInputs.forEach((input) => input.addEventListener("input", () => {
   const hadReview = Boolean(state.review);
@@ -74,9 +74,9 @@ assignmentTypeInput.addEventListener("change", () => {
   state.provisionalRubric.assignment_type = assignmentTypeInput.value;
   markRubricDirty();
 });
-byId("rubric-name").addEventListener("input", (event) => {
+byId("assignment-title").addEventListener("input", (event) => {
   if (!state.provisionalRubric) return;
-  state.provisionalRubric.title = event.target.value;
+  state.provisionalRubric.assignment_title = event.target.value;
   markRubricDirty();
 });
 document.querySelectorAll("[data-tolerance]").forEach((input) => {
@@ -206,6 +206,9 @@ function resetReview() {
   clearChildren(byId("drawing-viewport"));
   clearChildren(byId("issue-list"));
   byId("issue-empty").hidden = true;
+  byId("finding-summary").hidden = true;
+  byId("finding-summary-totals").textContent = "";
+  clearChildren(byId("finding-summary-groups"));
   document.querySelectorAll("[data-filter]").forEach((button) => {
     const active = button.dataset.filter === "all";
     button.classList.toggle("active", active);
@@ -396,7 +399,7 @@ function renderRubricEditor() {
   if (!rubric) return;
   byId("rubric-empty").hidden = true;
   byId("rubric-editor").hidden = false;
-  byId("rubric-name").value = rubric.title || "";
+  byId("assignment-title").value = rubric.assignment_title || "Assignment";
   assignmentTypeInput.value = rubric.assignment_type || state.suggestedAssignmentType || "Geometric Construction Exercise";
   rubric.assignment_type = assignmentTypeInput.value;
   assignmentTypeInput.disabled = state.loading;
@@ -498,7 +501,10 @@ function markRubricDirty() {
     normalizationModeInput.disabled = false;
     assignmentTypeInput.disabled = false;
   }
-  if (state.provisionalRubric) state.provisionalRubric.approved = false;
+  if (state.provisionalRubric) {
+    state.provisionalRubric.approved = false;
+    state.provisionalRubric.rubric_modified_by_instructor = true;
+  }
   byId("rubric-status").textContent = "Changes require instructor approval.";
   updateWeightTotal();
   updateReviewAvailability();
@@ -610,6 +616,7 @@ function renderResults(review) {
   byId("review-results").hidden = false;
   const gradingWithheld = review.grading_status === "withheld";
   byId("result-score").textContent = gradingWithheld ? "Not graded" : formatNumber(review.score);
+  byId("result-assignment-title").textContent = review.assignment_title || (review.rubric && review.rubric.assignment_title) || "Assignment";
   byId("result-score").nextElementSibling.hidden = gradingWithheld;
   byId("result-units").textContent = review.units || "unitless";
   byId("result-assignment-type").textContent = review.assignment_type || (review.rubric && review.rubric.assignment_type) || "Not confirmed";
@@ -627,6 +634,8 @@ function renderResults(review) {
   const completionMode = review.completion_scoring_mode || review.rubric.completion_scoring_mode || "rule_based";
   const normalizationMode = review.normalization_mode || review.rubric.normalization_mode || "strict";
   byId("result-rubric").textContent = (review.rubric.title || "Applied rubric") + " · " + source + " · " + completionPolicyLabel(completionMode) + " · " + placementModeLabel(normalizationMode);
+  byId("result-rubric").textContent = (review.rubric_template_name || "DraftLens Baseline Rubric") + " / " + humanize(review.rubric_source || "baseline_template") + " / " + completionPolicyLabel(completionMode) + " / " + placementModeLabel(normalizationMode);
+  renderFindingSummary(review);
   renderCompatibility(review);
   renderScoreBreakdown(review, completionMode);
   renderNormalizationDecision(review);
@@ -636,7 +645,7 @@ function renderResults(review) {
   state.filter = "all";
   resetIssueSelection();
   setFilter("all");
-  const firstPrimary = review.issues.find(isPrimaryStudentIssue);
+  const firstPrimary = presentedIssues(review).find(isPrimaryStudentIssue);
   if (firstPrimary) {
     selectIssue(firstPrimary.issue_id, false);
   } else {
@@ -651,7 +660,7 @@ function renderResults(review) {
 function renderCompatibility(review) {
   const compatibility = review.compatibility || review;
   const withheld = review.grading_status === "withheld";
-  const overridden = Boolean(compatibility.instructor_override);
+  const overridden = compatibility.instructor_override === true;
   const card = byId("compatibility-card");
   card.hidden = !(withheld || overridden);
   if (card.hidden) return;
@@ -665,7 +674,8 @@ function renderCompatibility(review) {
   const scale = compatibility.estimated_uniform_scale;
   byId("compatibility-scale").textContent = scale ? formatNumber(scale) + "x" : "Not detected";
   byId("compatibility-reasons").textContent = (compatibility.compatibility_reason_codes || []).map(humanize).join(" / ");
-  gradeAnywayButton.hidden = !withheld;
+  const actions = Array.isArray(review.available_actions) ? review.available_actions : [];
+  gradeAnywayButton.hidden = !(withheld && actions.includes("grade_anyway"));
   chooseAnotherFileButton.hidden = !withheld;
 }
 
@@ -680,8 +690,21 @@ function renderNormalizationDecision(review) {
   byId("result-normalization-mode").textContent = placementModeLabel(mode);
   if (mode === "strict") {
     byId("result-transform").textContent = "None permitted";
-    byId("normalization-evidence").hidden = true;
-    byId("result-transform-reason-row").hidden = true;
+    const displacement = decision.global_displacement;
+    if (!displacement) {
+      byId("normalization-evidence").hidden = true;
+      byId("result-transform-reason-row").hidden = true;
+      return;
+    }
+    byId("normalization-evidence").hidden = false;
+    byId("result-applied-translation").textContent = "None";
+    byId("result-candidate-translation").textContent = formatTranslation(decision.candidate_translation);
+    byId("result-transform-support").textContent = String(displacement.support_count || 0) + " of " + String(displacement.evidence_count || 0) + " compatible entities";
+    byId("result-transform-ratio").textContent = formatNumber(Number(displacement.support_ratio || 0) * 100) + "%";
+    byId("result-transform-confidence").textContent = humanize(decision.confidence);
+    byId("result-error-reduction").textContent = "Not applied in Strict placement";
+    byId("result-transform-reason-row").hidden = false;
+    byId("result-transform-reason").textContent = "Robust translation detected; absolute placement remains graded.";
     return;
   }
 
@@ -728,6 +751,48 @@ function findingCounts(review) {
     unsupported_entities: (unsupported.reference || []).length + (unsupported.student || []).length,
   };
 }
+
+function presentedIssues(review) {
+  const presentation = review.finding_presentation || {};
+  if (!presentation.compacted) return review.issues || [];
+  const displayed = new Set(presentation.displayed_issue_ids || []);
+  return (review.issues || []).filter((issue) => displayed.has(issue.issue_id));
+}
+
+function renderFindingSummary(review) {
+  const presentation = review.finding_presentation || {};
+  const section = byId("finding-summary");
+  section.hidden = !presentation.compacted;
+  clearChildren(byId("finding-summary-groups"));
+  if (!presentation.compacted) {
+    byId("finding-summary-totals").textContent = "";
+    return;
+  }
+  byId("finding-summary-totals").textContent =
+    String(presentation.total_raw_count || 0) + " primary findings / " +
+    String(presentation.total_displayed_count || 0) + " displayed / " +
+    String(presentation.total_summarized_count || 0) + " summarized.";
+  (presentation.summary_groups || []).forEach((group) => {
+    const row = document.createElement("div");
+    row.className = "finding-summary-row";
+    const title = document.createElement("strong");
+    title.textContent = humanize(group.issue_type);
+    const counts = document.createElement("span");
+    counts.textContent =
+      String(group.total_count || 0) + " total; " +
+      String(group.contributed_count || 0) + " contributed; " +
+      String(group.summarized_count || 0) + " capped findings summarized.";
+    const evidence = document.createElement("small");
+    evidence.textContent =
+      humanize(group.score_category || "not_scored") + " / " +
+      humanize(group.deduction_status || "not_scored") + " / " +
+      humanize(group.cap_reason || "none") + " / contribution " +
+      formatDeduction(group.score_contribution);
+    row.append(title, counts, evidence);
+    byId("finding-summary-groups").append(row);
+  });
+}
+
 function renderScoreBreakdown(review, completionMode) {
   const breakdown = review.score_breakdown || {};
   const categories = breakdown.category_subtotals || [];
@@ -744,6 +809,15 @@ function renderScoreBreakdown(review, completionMode) {
       "Earned " + formatNumber(category.score) + " / " + formatNumber(category.weight) +
       " · Applied " + formatDeduction(category.deduction);
     row.append(name, detail);
+    detail.textContent = "";
+    const earned = document.createElement("strong");
+    earned.className = "category-earned";
+    earned.textContent = formatNumber(category.score);
+    const available = document.createElement("span");
+    available.textContent = " / " + formatNumber(category.weight);
+    const applied = document.createElement("small");
+    applied.textContent = "Applied " + formatDeduction(category.deduction);
+    detail.append(earned, available, applied);
     const definition = document.createElement("p");
     definition.className = "score-category-definition";
     definition.textContent = category.definition || "";
@@ -839,7 +913,7 @@ function renderIssueList() {
     byId("issue-empty").hidden = true;
     return;
   }
-  const visible = state.review.issues.filter((issue) => state.filter === "all" || issue.visual_role === state.filter);
+  const visible = presentedIssues(state.review).filter((issue) => state.filter === "all" || issue.visual_role === state.filter);
   byId("issue-empty").hidden = visible.length !== 0;
   visible.forEach((issue) => {
     const button = document.createElement("button");
@@ -945,6 +1019,7 @@ function renderCorrectionGuidance(issue) {
   resetCorrectionGuidance();
   const guidance = issue.correction_guidance;
   if (!guidance) return;
+  if (findingRole(issue) !== "primary") return;
 
   const primary = guidance.primary_command || "";
   const alternatives = Array.isArray(guidance.alternative_commands) ? guidance.alternative_commands : [];
@@ -954,14 +1029,15 @@ function renderCorrectionGuidance(issue) {
   const commands = commandsForIssue(issue);
 
   appendCommandItems("command-list", commands);
-  appendCommandItems("guidance-alternatives", alternatives);
-  appendCommandItems("guidance-precision", precisionAids);
+  appendCommandItems("guidance-alternatives", alternatives.length ? alternatives : ["None"]);
+  appendCommandItems("guidance-precision", precisionAids.length ? precisionAids : ["None"]);
   byId("guidance-primary").textContent = primary || "—";
   byId("guidance-explanation").textContent = explanation;
   byId("guidance-related-id").textContent = relatedId || "—";
   byId("guidance-primary-row").hidden = !primary;
-  byId("guidance-alternatives-row").hidden = alternatives.length === 0;
-  byId("guidance-precision-row").hidden = precisionAids.length === 0;
+  byId("guidance-primary-row").querySelector("dt").textContent = "Primary command";
+  byId("guidance-alternatives-row").hidden = !primary;
+  byId("guidance-precision-row").hidden = !primary;
   byId("guidance-related").hidden = !relatedId;
   byId("guidance-supporting-label").hidden = findingRole(issue) !== "supporting";
   byId("guidance-no-command").hidden = Boolean(primary);

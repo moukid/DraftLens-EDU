@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from app.rubric import Rubric, RubricCategory, default_rubric
+from app.rubric import Rubric, RubricCategory, default_rubric, suggest_assignment_title
 
 def test_default_rubric_totals_100_and_is_provisional():
     rubric = default_rubric()
@@ -12,12 +12,24 @@ def test_default_rubric_totals_100_and_is_provisional():
 
 def test_rubric_accepts_only_instructor_assignment_type_options():
     payload = default_rubric().model_dump()
+    payload["assignment_type"] = "Complex Geometric Pattern"
+    assert Rubric.model_validate(payload).assignment_type == "Complex Geometric Pattern"
+
     payload["assignment_type"] = "Islamic Geometric Pattern"
-    assert Rubric.model_validate(payload).assignment_type == "Islamic Geometric Pattern"
+    with pytest.raises(ValidationError):
+        Rubric.model_validate(payload)
 
     payload["assignment_type"] = "Gothic pattern"
     with pytest.raises(ValidationError):
         Rubric.model_validate(payload)
+
+def test_assignment_title_suggestion_removes_safe_technical_filename_parts():
+    assert suggest_assignment_title(
+        "00_REFERENCE_Interior_Plan_Supported_Geometry.dxf"
+    ) == "Interior Plan"
+    assert suggest_assignment_title(
+        "00_REFERENCE_Complex_Pattern_Supported_Geometry.dxf"
+    ) == "Complex Pattern"
 
 def test_rubric_rejects_weights_that_do_not_total_100():
     with pytest.raises(ValidationError, match="weights must total 100"):

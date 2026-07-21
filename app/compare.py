@@ -23,6 +23,8 @@ class Tolerances:
 MIN_TRANSLATION_SUPPORT = 3
 MIN_TRANSLATION_SUPPORT_RATIO = 0.60
 MIN_TRANSLATION_ERROR_REDUCTION = 0.25
+MIN_GLOBAL_TRANSLATION_SUPPORT_RATIO = 0.75
+MIN_GLOBAL_TRANSLATION_SUPPORT = 8
 GEOMETRY_PRECISION = 6
 
 def _rounded(value: float | None) -> float | None:
@@ -521,14 +523,52 @@ def _prepare_comparison_geometry(
 ) -> tuple[Drawing, dict[str, Any], dict[str, Any]]:
     mode = rubric.normalization_mode
     if mode == "strict":
+        estimate = _estimate_translation(reference, student, tolerance)
+        robust = (
+            bool(estimate["selected_translation"] != (0.0, 0.0))
+            and estimate["support_count"] >= MIN_GLOBAL_TRANSLATION_SUPPORT
+            and estimate["support_ratio"] >= MIN_GLOBAL_TRANSLATION_SUPPORT_RATIO
+        )
+        matching_translation = (
+            tuple(estimate["selected_translation"])
+            if robust
+            else (0.0, 0.0)
+        )
+        displacement = (-matching_translation[0], -matching_translation[1])
+        magnitude = math.dist(displacement, (0.0, 0.0))
         strict_record = _normalization_record(
             "strict",
             (0.0, 0.0),
-            confidence="not_applicable",
-            rejection_reason="strict_mode",
+            candidate=estimate["candidate_translation"],
+            support_count=estimate["support_count"],
+            support_ratio=estimate["support_ratio"],
+            confidence=estimate["confidence"],
+            rejection_reason=(
+                "strict_mode_disallows_transform"
+                if robust
+                else "strict_mode"
+            ),
+            error_before=estimate["error_before"],
+            error_after=estimate["error_after"],
+            error_reduction_ratio=estimate["error_reduction_ratio"],
+            evidence_count=estimate["evidence_count"],
         )
+        strict_record["matching_translation"] = list(matching_translation)
+        strict_record["global_displacement"] = {
+            "detected": robust,
+            "displacement_x": _rounded(displacement[0]),
+            "displacement_y": _rounded(displacement[1]),
+            "magnitude": _rounded(magnitude),
+            "support_count": estimate["support_count"],
+            "evidence_count": estimate["evidence_count"],
+            "support_ratio": estimate["support_ratio"],
+            "position_tolerance": float(tolerance.position),
+            "displacement_to_tolerance_ratio": _rounded(
+                magnitude / max(float(tolerance.position), 1e-9)
+            ),
+        }
         return (
-            _translated_drawing(student, (0.0, 0.0), strict_record),
+            _translated_drawing(student, matching_translation, strict_record),
             deepcopy(strict_record),
             deepcopy(strict_record),
         )
@@ -690,6 +730,41 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
 
     for finding in analysis.findings:
         add(finding)
+    global_displacement = student_normalization.get("global_displacement") or {}
+    if global_displacement.get("detected"):
+        ratio = float(global_displacement["displacement_to_tolerance_ratio"])
+        if ratio <= 5:
+            scheduled_deduction = 25.0
+        elif ratio <= 20:
+            scheduled_deduction = 40.0
+        else:
+            scheduled_deduction = 50.0
+        issues.append(
+            Issue(
+                id="E-GLOBAL-DISPLACEMENT",
+                category="global_drawing_displacement",
+                code="GLOBAL_DRAWING_DISPLACEMENT",
+                severity="major" if ratio <= 20 else "critical",
+                confidence="verified",
+                classification="primary",
+                deduction=scheduled_deduction,
+                location=(
+                    (reference.bbox[0] + reference.bbox[2]) / 2.0,
+                    (reference.bbox[1] + reference.bbox[3]) / 2.0,
+                ),
+                measurement=deepcopy(global_displacement),
+                technical_feedback=(
+                    "The complete drawing is displaced by one consistent vector "
+                    "while strict placement is required."
+                ),
+                message="Move the complete drawing to the approved reference location.",
+                expected=[0.0, 0.0],
+                actual=[
+                    global_displacement["displacement_x"],
+                    global_displacement["displacement_y"],
+                ],
+            )
+        )
 
     for issue in issues:
         if issue.category != "endpoint_gap" or issue.measurement is None:

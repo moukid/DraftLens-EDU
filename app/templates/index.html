@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DraftLens EDU — Visual drawing review</title>
-  <link rel="stylesheet" href="/static/style.css?v=0.2.0">
+  <link rel="stylesheet" href="/static/style.css?v=0.2.1">
   <link rel="icon" href="data:,">
 </head>
 <body>
@@ -42,13 +42,14 @@
         <div class="step-heading"><span>2</span><div><h2 id="rubric-heading">Rubric approval</h2><p>Review the suggested settings and approve them for this reference.</p></div></div>
         <p id="rubric-empty" class="empty-copy">Analyze a reference to generate a provisional rubric.</p>
         <div id="rubric-editor" hidden>
-          <label class="field">Rubric name<input id="rubric-name" type="text" maxlength="160"></label>
+          <label class="field">Assignment title<input id="assignment-title" type="text" maxlength="160"></label>
+          <p class="policy-summary">The assignment title identifies this assessment. It is separate from the fixed DraftLens Baseline Rubric template.</p>
           <label class="field" for="assignment-type">Assignment type
             <select id="assignment-type" required>
               <option value="Geometric Construction Exercise">Geometric Construction Exercise</option>
               <option value="Mixed Geometric Composition">Mixed Geometric Composition</option>
               <option value="Geometric Pattern">Geometric Pattern</option>
-              <option value="Islamic Geometric Pattern">Islamic Geometric Pattern</option>
+              <option value="Complex Geometric Pattern">Complex Geometric Pattern</option>
               <option value="Interior Plan">Interior Plan</option>
               <option value="Architectural Drawing">Architectural Drawing</option>
               <option value="Technical Drawing">Technical Drawing</option>
@@ -81,12 +82,13 @@
           <fieldset>
             <legend>Geometry tolerances</legend>
             <div class="tolerance-grid">
-              <label>Position<input data-tolerance="position" type="number" min="0" step="0.1"></label>
-              <label>Length<input data-tolerance="length" type="number" min="0" step="0.1"></label>
+              <label title="Maximum allowed point or center displacement.">Position (drawing units)<input data-tolerance="position" type="number" min="0" step="0.1"><small>Endpoints, centers, and topology positions.</small></label>
+              <label title="Maximum allowed difference in measured length.">Length (drawing units)<input data-tolerance="length" type="number" min="0" step="0.1"><small>Lines, paths, arcs, circles, ellipses, and splines.</small></label>
               <label>Angle °<input data-tolerance="angle" type="number" min="0" step="0.1"></label>
-              <label>Radius<input data-tolerance="radius" type="number" min="0" step="0.1"></label>
-              <label>Dimension<input data-tolerance="dimension" type="number" min="0" step="0.1"></label>
-              <label>Vertex<input data-tolerance="vertex" type="number" min="0" step="0.1"></label>
+              <small class="tolerance-note">Degrees; line/path direction and arc span.</small>
+              <label title="Maximum allowed radius difference.">Radius (drawing units)<input data-tolerance="radius" type="number" min="0" step="0.1"><small>Circle and arc radius.</small></label>
+              <label title="Maximum allowed dimension measurement difference.">Dimension (drawing units)<input data-tolerance="dimension" type="number" min="0" step="0.1"><small>Supported DXF dimension measurements.</small></label>
+              <label hidden>Vertex tolerance unavailable<input data-tolerance="vertex" type="number" min="0" step="0.1" disabled></label>
             </div>
           </fieldset>
           <button id="approve-rubric" type="button" class="primary-button">Approve rubric</button>
@@ -134,6 +136,7 @@
       <div id="review-results" hidden>
         <section class="results-bar" aria-labelledby="results-heading">
           <div><p class="eyebrow">Reviewed result</p><h2 id="results-heading">Drawing assessment</h2><p id="result-rubric">—</p><dl class="metric-grid result-context"><div><dt>Assignment type</dt><dd id="result-assignment-type">Not confirmed</dd></div><div><dt>Detected structure</dt><dd id="result-detected-features">Not analyzed</dd></div></dl></div>
+          <p class="result-assignment-title">Assignment title: <strong id="result-assignment-title">Not confirmed</strong></p>
           <dl class="result-metrics">
             <div class="score-metric"><dt>Score</dt><dd><strong id="result-score">—</strong><span>/100</span></dd></div>
             <div><dt>Units</dt><dd id="result-units">—</dd></div>
@@ -233,6 +236,11 @@
               <button type="button" data-filter="warning" aria-pressed="false">Warnings</button>
               <button type="button" data-filter="critical" aria-pressed="false">Critical</button>
             </div>
+            <section id="finding-summary" class="finding-summary" hidden>
+              <h3>Compact finding summary</h3>
+              <p id="finding-summary-totals"></p>
+              <div id="finding-summary-groups"></div>
+            </section>
             <div id="issue-list" class="issue-list"></div>
             <p id="issue-empty" class="empty-copy" hidden>No issues match this filter.</p>
           </section>
@@ -257,7 +265,7 @@
                 <div><dt>Confidence</dt><dd id="evidence-confidence">—</dd></div>
               </dl>
               <div id="feedback-commands" hidden>
-                <h3>Correction guidance</h3>
+                <h3>How to correct</h3>
                 <p id="guidance-supporting-label" class="guidance-supporting" hidden>Supporting topology evidence</p>
                 <p id="guidance-related" hidden>Resolve linked primary issue: <strong id="guidance-related-id">—</strong></p>
                 <dl class="guidance-list">
@@ -277,6 +285,6 @@
   </main>
 
   <footer>DraftLens EDU · Approved rubrics · Deterministic geometry · Traceable evidence</footer>
-  <script src="/static/app.js?v=0.2.0"></script>
+  <script src="/static/app.js?v=0.2.1"></script>
 </body>
 </html>

@@ -110,7 +110,7 @@ def test_ui_assets_are_served_from_fastapi_static_mount():
 
 def test_page_has_no_external_or_cdn_dependencies():
     response, parser = page()
-    assert parser.assets == ["/static/style.css?v=0.2.0", "data:,", "/static/app.js?v=0.2.0"]
+    assert parser.assets == ["/static/style.css?v=0.2.1", "data:,", "/static/app.js?v=0.2.1"]
     lowered = response.text.lower()
     assert "http://" not in lowered
     assert "https://" not in lowered
@@ -127,8 +127,8 @@ def test_static_assets_share_a_deterministic_release_version():
         for asset in static_assets
     }
 
-    assert static_assets == ["/static/style.css?v=0.2.0", "/static/app.js?v=0.2.0"]
-    assert versions == {"0.2.0"}
+    assert static_assets == ["/static/style.css?v=0.2.1", "/static/app.js?v=0.2.1"]
+    assert versions == {"0.2.1"}
     assert repeated.assets == first.assets
     assert all(client.get(asset).status_code == 200 for asset in static_assets)
 
@@ -205,7 +205,7 @@ def test_review_state_reset_and_finding_roles_are_explicitly_wired():
     assert 'element.classList.remove("is-selected")' in javascript
     assert 'byId("feedback-detail").hidden = true' in javascript
     assert 'resetCorrectionGuidance();' in javascript
-    assert "review.issues.find(isPrimaryStudentIssue)" in javascript
+    assert "presentedIssues(review).find(isPrimaryStudentIssue)" in javascript
     assert "No student issues detected" in javascript
     assert "Supporting topology evidence" in javascript
     assert "No separate deduction" in javascript
@@ -228,7 +228,7 @@ def test_normalization_selector_invalidates_approval_and_result_evidence_is_visi
     assert "Local movement remains an error" in javascript
     listener = javascript[
         javascript.index('normalizationModeInput.addEventListener("change"'):
-        javascript.index('byId("rubric-name").addEventListener')
+        javascript.index('byId("assignment-title").addEventListener')
     ]
     assert "state.provisionalRubric.normalization_mode = normalizationModeInput.value" in listener
     assert "markRubricDirty();" in listener
@@ -256,7 +256,7 @@ def test_assignment_type_is_instructor_confirmed_and_invalidates_approval():
         "Geometric Construction Exercise",
         "Mixed Geometric Composition",
         "Geometric Pattern",
-        "Islamic Geometric Pattern",
+        "Complex Geometric Pattern",
         "Interior Plan",
         "Architectural Drawing",
         "Technical Drawing",
@@ -265,7 +265,7 @@ def test_assignment_type_is_instructor_confirmed_and_invalidates_approval():
         assert f'>{option}</option>' in response.text
     listener = javascript[
         javascript.index('assignmentTypeInput.addEventListener("change"'):
-        javascript.index('byId("rubric-name").addEventListener')
+        javascript.index('byId("assignment-title").addEventListener')
     ]
     assert "state.provisionalRubric.assignment_type = assignmentTypeInput.value" in listener
     assert "markRubricDirty();" in listener
@@ -275,6 +275,21 @@ def test_assignment_type_is_instructor_confirmed_and_invalidates_approval():
     assert "assignmentTypeInput.disabled = false" in dirty
     assert 'byId("result-assignment-type").textContent' in javascript
     assert 'byId("result-detected-features").textContent' in javascript
+    assert 'byId("result-assignment-title").textContent' in javascript
+    assert "Islamic Geometric Pattern" not in response.text
+
+
+def test_final_acceptance_presentation_controls_are_wired():
+    response, parser = page()
+    javascript = client.get("/static/app.js").text
+    stylesheet = client.get("/static/style.css").text
+    assert parser.elements["assignment-title"][0] == "input"
+    assert 'reviewButton.addEventListener("click", () => runReview(false))' in javascript
+    assert 'gradeAnywayButton.addEventListener("click", () => runReview(true))' in javascript
+    assert "finding_presentation" in javascript
+    assert "How to correct" in response.text
+    assert "category-earned" in javascript and ".category-earned" in stylesheet
+    assert 'data-tolerance="vertex"' in response.text and "Vertex tolerance unavailable" in response.text
 
 
 def test_reference_analysis_timeout_clears_loading_and_displays_error():

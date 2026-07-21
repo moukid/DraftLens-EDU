@@ -132,10 +132,10 @@ def test_rubric_approval_requires_assignment_type_confirmation():
 def test_instructor_confirmed_assignment_type_is_returned_by_review():
  document=_abstract_document_bytes()
  suggestion=client.post("/api/rubric/suggest",files={"reference":("abstract.dxf",document,"application/dxf")}).json()
- suggestion["rubric"]["assignment_type"]="Islamic Geometric Pattern"
+ suggestion["rubric"]["assignment_type"]="Complex Geometric Pattern"
  approval=client.post("/api/rubric/approve",json={"reference_id":suggestion["reference_id"],"rubric":suggestion["rubric"]})
  assert approval.status_code==200
- assert approval.json()["assignment_type"]=="Islamic Geometric Pattern"
+ assert approval.json()["assignment_type"]=="Complex Geometric Pattern"
  response=client.post("/api/review",files={
   "reference":("abstract.dxf",document,"application/dxf"),
   "student":("abstract-exact.dxf",document,"application/dxf"),
@@ -144,8 +144,9 @@ def test_instructor_confirmed_assignment_type_is_returned_by_review():
  body=response.json()
  assert body["score"]==100
  assert body["suggested_assignment_type"]=="Mixed Geometric Composition"
- assert body["assignment_type"]=="Islamic Geometric Pattern"
- assert body["rubric"]["assignment_type"]=="Islamic Geometric Pattern"
+ assert body["assignment_type"]=="Complex Geometric Pattern"
+ assert body["rubric"]["assignment_type"]=="Complex Geometric Pattern"
+ assert body["assignment_title"]=="Abstract"
  assert body["detected_features"]==suggestion["detected_features"]
 
 def test_review_uses_associated_approved_rubric_and_returns_stable_contract():

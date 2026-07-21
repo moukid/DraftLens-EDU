@@ -197,7 +197,7 @@ def test_pdf_reopens_and_contains_authoritative_score_assignment_evidence_and_pa
         missing["issue_id"],
         "Raw deduction",
         "Applied deduction",
-        "Primary correction",
+        "Primary command",
         "Strict placement",
     ):
         assert expected in text
@@ -452,10 +452,10 @@ def _assert_full_pdf_legend(reader):
     (
         (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-Student-OK.dxf", "strict", 100, 0, 2, "Strict placement. No transform is permitted or applied."),
         (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-TwoOnly-Moved.dxf", "strict", 94, 2, 2, "Strict placement. No transform is permitted or applied."),
-        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "strict", 91, 3, 2, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "strict", 91, 3, 3, "Strict placement. No transform is permitted or applied."),
         (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "translation", 100, 0, 2, "transform accepted"),
         (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Student-OK.dxf", "strict", 100, 0, 2, "Strict placement. No transform is permitted or applied."),
-        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Gap-3Unit.dxf", "strict", 97, 1, 3, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Gap-3Unit.dxf", "strict", 97, 1, 2, "Strict placement. No transform is permitted or applied."),
         (SAMPLES / "reference.dxf", SAMPLES / "student_door_window_errors.dxf", "strict", 88, 4, 3, "Strict placement. No transform is permitted or applied."),
     ),
 )

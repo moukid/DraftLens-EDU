@@ -1,4 +1,6 @@
 from __future__ import annotations
+from pathlib import PurePath
+import re
 from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
@@ -6,14 +8,14 @@ AssignmentType = Literal[
     "Geometric Construction Exercise",
     "Mixed Geometric Composition",
     "Geometric Pattern",
-    "Islamic Geometric Pattern",
+    "Complex Geometric Pattern",
     "Interior Plan",
     "Architectural Drawing",
     "Technical Drawing",
     "Other",
 ]
 
-BASELINE_RUBRIC_TEMPLATE = "DraftLens baseline rubric template"
+BASELINE_RUBRIC_TEMPLATE = "DraftLens Baseline Rubric"
 SCORE_CATEGORY_BY_CHECK: dict[str, str] = {
     "incorrect_position": "geometry",
     "incorrect_length": "geometry",
@@ -22,6 +24,7 @@ SCORE_CATEGORY_BY_CHECK: dict[str, str] = {
     "incorrect_shape": "geometry",
     "endpoint_gap": "geometry",
     "disconnected_geometry": "geometry",
+    "global_drawing_displacement": "geometry",
     "unwanted_intersection": "geometry",
     "overlapping_geometry": "geometry",
     "missing_geometry": "completion",
@@ -66,6 +69,7 @@ class RubricCategory(BaseModel):
 
 class Rubric(BaseModel):
     title: str = "DraftLens assignment rubric"
+    assignment_title: str = "Assignment"
     approved: bool = False
     assignment_type: AssignmentType | None = None
     categories: list[RubricCategory]
@@ -103,6 +107,7 @@ def default_rubric(title: str = "Geometric accuracy rubric") -> Rubric:
         RubricRule(id="RULE-ANGLE-01", check="incorrect_angle", deduction=3, repeat_cap=15, commands=["ROTATE", "POLAR"]),
         RubricRule(id="RULE-RADIUS-01", check="incorrect_radius", deduction=3, repeat_cap=15, commands=["CIRCLE", "STRETCH"]),
         RubricRule(id="RULE-SHAPE-01", check="incorrect_shape", deduction=4, repeat_cap=15, commands=["PEDIT", "JOIN"]),
+        RubricRule(id="RULE-GLOBAL-DISPLACEMENT-01", check="global_drawing_displacement", deduction=50, repeat_cap=50, commands=["MOVE"]),
     ]
     completion = [
         RubricRule(id="RULE-MISSING-01", check="missing_geometry", deduction=5, repeat_cap=25, commands=["LINE", "PLINE", "CIRCLE"]),
@@ -136,8 +141,22 @@ def rubric_rule_map(rubric: Rubric):
 
 def rubric_contract(rubric: Rubric) -> dict[str, object]:
     return {
+        "assignment_title": rubric.assignment_title,
         "rubric_source": rubric.rubric_source,
         "rubric_template_name": rubric.rubric_template_name,
         "rubric_modified_by_instructor": rubric.rubric_modified_by_instructor,
         "category_definitions": dict(CATEGORY_DEFINITIONS),
     }
+
+
+def suggest_assignment_title(filename: str | None) -> str:
+    """Return a neutral instructor-editable title from a reference filename."""
+
+    basename = PurePath(str(filename or "Assignment").replace("\\", "/")).name
+    stem = PurePath(basename).stem
+    cleaned = re.sub(r"[_\-]+", " ", stem)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"^(?:\d+\s+)?reference\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+supported\s+geometry$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned.title() if cleaned else "Assignment"

@@ -73,7 +73,7 @@ def test_flat_commands_are_primary_then_alternatives_then_precision_and_unique()
         ("incorrect_angle", "line", "ROTATE", {"ROTATE", "REFERENCE", "POLAR", "OSNAP"}, {"MOVE"}),
         ("incorrect_radius", "circle", "PROPERTIES", {"PROPERTIES", "SCALE", "CIRCLE"}, set()),
         ("incorrect_radius", "arc", "PROPERTIES", {"PROPERTIES", "SCALE", "ARC", "OSNAP"}, set()),
-        ("extra_geometry", "line", "ERASE", {"ERASE", "SELECTSIMILAR"}, {"OVERKILL"}),
+        ("extra_geometry", "line", "ERASE", {"ERASE"}, {"OVERKILL", "SELECTSIMILAR"}),
         ("duplicate_geometry", "line", "OVERKILL", {"OVERKILL", "ERASE"}, set()),
         ("open_polyline", "polyline", "PEDIT", {"PEDIT", "JOIN", "CLOSE"}, set()),
     ),

@@ -258,6 +258,9 @@ fieldset legend { padding: 0 4px; }
 .tolerance-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .tolerance-grid label { color: var(--muted); font-size: 10px; font-weight: 700; }
 .tolerance-grid input { margin-top: 3px; padding: 6px; }
+.tolerance-grid label small, .tolerance-note { display: block; margin-top: 4px; color: #64736c; font-size: 9px; font-weight: 500; line-height: 1.35; }
+.tolerance-note { grid-column: 1 / -1; margin-top: -4px; }
+.result-assignment-title { align-self: center; margin: 0; color: var(--muted); font-size: 11px; }
 .policy-fieldset { background: var(--surface-muted); }
 .policy-summary { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
 .policy-fieldset select:disabled { background: #edf1ef; color: #3d4c45; }
@@ -354,6 +357,10 @@ fieldset legend { padding: 0 4px; }
 .score-breakdown-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; }
 .score-breakdown-row + .score-breakdown-row { border-top: 1px solid var(--line); padding-top: 5px; }
 .score-breakdown-values { color: var(--muted); text-align: right; }
+.score-breakdown-values { display: flex; align-items: baseline; justify-content: flex-end; gap: 3px; flex-wrap: wrap; }
+.score-breakdown-values .category-earned { color: var(--green); font-size: 18px; font-weight: 850; }
+.score-breakdown-values small { flex-basis: 100%; color: var(--muted); font-size: 10px; }
+
 .score-breakdown-total { margin: 0; display: grid; gap: 6px; }
 .score-breakdown-total div { display: flex; justify-content: space-between; gap: 12px; }
 .score-breakdown-total div:last-child { border-top: 1px solid var(--line-strong); padding-top: 6px; }
@@ -590,7 +597,15 @@ fieldset legend { padding: 0 4px; }
   gap: 10px;
 }
 .evidence-list dd { font-size: 11px; font-weight: 650; }
-#feedback-commands { margin-top: 14px; }
+#feedback-commands {
+  margin-top: 14px;
+  padding: 12px;
+  border: 2px solid #2d7254;
+  border-radius: 8px;
+  background: #eff8f3;
+}
+#feedback-commands h3 { margin: 0 0 8px; color: #16543b; font-size: 14px; }
+#guidance-primary { color: #123f2e; font-size: 15px; font-weight: 900; }
 .guidance-supporting, .guidance-no-command {
   margin: 8px 0;
   color: #775100;
@@ -617,6 +632,15 @@ fieldset legend { padding: 0 4px; }
   font-family: ui-monospace, "Cascadia Code", monospace;
   font-size: 10px;
   font-weight: 800;
+}
+
+.finding-summary { margin: 10px 0 14px; padding: 12px; border: 1px solid #c99a35; border-radius: 8px; background: #fff9e9; }
+.finding-summary h3 { margin: 0 0 5px; font-size: 13px; }
+.finding-summary > p { margin: 0 0 8px; color: #6b541d; font-size: 11px; font-weight: 700; }
+.finding-summary-row { display: grid; grid-template-columns: minmax(120px, .7fr) 1.5fr 1fr; gap: 8px; padding: 7px 0; border-top: 1px solid #ead7a9; font-size: 10px; }
+.finding-summary-row small { color: var(--muted); }
+@media (max-width: 760px) {
+  .finding-summary-row { grid-template-columns: 1fr; gap: 3px; }
 }
 
 .is-loading .primary-button:not(:disabled) { opacity: .72; }

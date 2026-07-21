@@ -16,7 +16,10 @@ from .review_snapshot import (
     ReviewSnapshotStore, SnapshotCapacityError, SnapshotExpired, SnapshotNotFound,
     StudentMetadataError, normalize_student_metadata,
 )
-from .rubric import BASELINE_RUBRIC_TEMPLATE, Rubric, default_rubric, rubric_contract
+from .rubric import (
+    BASELINE_RUBRIC_TEMPLATE, Rubric, default_rubric, rubric_contract,
+    suggest_assignment_title,
+)
 from .validator import validate_reference
 ROOT=Path(__file__).parent; templates=Environment(loader=FileSystemLoader(ROOT/"templates"),autoescape=select_autoescape())
 app=FastAPI(title="DraftLens EDU",version="0.2.0"); app.mount("/static",StaticFiles(directory=ROOT/"static"),name="static")
@@ -144,7 +147,11 @@ async def grade(
     if output.compatibility.grading_withheld:
         message = compatibility_message(output)
         result["compatibility_message"] = message
-        result["available_actions"] = ["choose_another_file", "grade_anyway"]
+        result["available_actions"] = (
+            ["choose_another_file", "grade_anyway"]
+            if output.compatibility.status != "empty_or_ungradable"
+            else ["choose_another_file"]
+        )
         result["feedback"] = [message]
         result["ai_used"] = False
     return result
@@ -187,6 +194,7 @@ async def review(
             student_metadata=metadata,
             approved_rubric_id=uploaded.output.rubric_id,
             approved_rubric=uploaded.output.rubric.model_dump(),
+            assignment_title=uploaded.output.rubric.assignment_title,
             assignment_type=uploaded.output.rubric.assignment_type,
             suggested_assignment_type=uploaded.output.analysis["suggested_assignment_type"],
             detected_features=uploaded.output.analysis["detected_features"],
@@ -226,8 +234,12 @@ async def rubric_suggest(reference: UploadFile = File(...)):
     reference_bytes = await read_upload(reference)
     drawing = parse_dxf_bytes(reference_bytes, source="reference")
     analysis = analyze_assignment(drawing)
-    suggested_rubric = default_rubric(reference.filename or "Assignment rubric").model_copy(
-        update={"normalization_mode": "strict"}
+    assignment_title = suggest_assignment_title(reference.filename)
+    suggested_rubric = default_rubric().model_copy(
+        update={
+            "assignment_title": assignment_title,
+            "normalization_mode": "strict",
+        }
     )
     return {
         "reference_id": reference_fingerprint(reference_bytes),

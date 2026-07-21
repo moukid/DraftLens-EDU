@@ -136,6 +136,10 @@ def assess_compatibility(
             confidence = "moderate"
             reasons.append("insufficient_confident_correspondence")
 
+    effective_override = bool(
+        instructor_override
+        and status in {"suspicious", "incompatible"}
+    )
     return CompatibilityResult(
         compatibility_status=status,
         compatibility_confidence=confidence,
@@ -151,5 +155,5 @@ def assess_compatibility(
         accepted_transform=accepted_transform,
         estimated_uniform_scale=scale.estimated_scale_factor,
         scale_confidence=scale.scale_confidence,
-        instructor_override=bool(instructor_override),
+        instructor_override=effective_override,
     )

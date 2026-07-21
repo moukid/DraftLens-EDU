@@ -99,6 +99,15 @@ def test_scaled_copy_is_withheld_then_override_is_authoritative_and_reported():
     assert "Instructor compatibility override" in text
     assert "Grade anyway" in text
 
+    subsequent = client.post(
+        "/api/review",
+        files=_files(reference, reference),
+    ).json()
+    assert subsequent["compatibility_status"] == "compatible"
+    assert subsequent["instructor_override"] is False
+    assert "compatibility_override" not in subsequent
+
+
 
 def test_unrelated_t_crossing_is_withheld_without_issue_flood():
     reference = _plan_bytes(count=40)
@@ -133,6 +142,8 @@ def test_empty_student_is_not_graded():
     assert body["compatibility_status"] == "empty_or_ungradable"
     assert body["score"] is None
     assert body["report_available"] is False
+    assert body["available_actions"] == ["choose_another_file"]
+    assert body["instructor_override"] is False
 
 
 def test_rubric_source_changes_when_instructor_changes_weight():
@@ -155,4 +166,27 @@ def test_rubric_source_changes_when_instructor_changes_weight():
     rubric = response.json()["rubric"]
     assert rubric["rubric_source"] == "instructor_modified"
     assert rubric["rubric_modified_by_instructor"] is True
-    assert rubric["rubric_template_name"] == "DraftLens baseline rubric template"
+    assert rubric["rubric_template_name"] == "DraftLens Baseline Rubric"
+
+
+def test_compatible_review_never_records_override_even_if_requested():
+    reference = _plan_bytes(count=12)
+    approval = _approve(reference)
+    review = client.post(
+        "/api/review",
+        data={"grade_anyway": "true"},
+        files=_files(reference, reference),
+    ).json()
+    assert review["compatibility_status"] == "compatible"
+    assert review["instructor_override"] is False
+    assert "compatibility_override" not in review
+    assert review["score"] == 100
+    assert review["rubric_template_name"] == "DraftLens Baseline Rubric"
+    assert review["rubric"]["assignment_title"] == "Reference"
+    pdf = client.get(f"/api/reviews/{review['review_id']}/report.pdf")
+    assert pdf.status_code == 200
+    text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf.content)).pages
+    )
+    assert "Instructor compatibility override" not in text
+    assert approval["rubric_id"] == review["rubric_selection"]["rubric_id"]

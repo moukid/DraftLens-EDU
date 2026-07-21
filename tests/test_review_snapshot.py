@@ -42,6 +42,7 @@ def create(store, token="R1", *, reference=b"ref", student=b"student", payload=N
         approved_rubric_id="rubric-1",
         approved_rubric={"title": "Test rubric", "approved": True},
         assignment_type="Technical Drawing",
+        assignment_title="Test Assignment",
         suggested_assignment_type="Technical Drawing",
         detected_features=["mixed geometric primitives"],
         reviewed_drawing=reviewed(),
@@ -82,6 +83,7 @@ def test_snapshot_is_authoritative_immutable_and_hashes_raw_uploads():
         student_metadata=normalize_student_metadata("Zo?"), approved_rubric_id="rubric-1", approved_rubric=rubric,
         assignment_type="Technical Drawing", suggested_assignment_type="Technical Drawing", detected_features=["feature"],
         reviewed_drawing=reviewed(95), review_response=source,
+        assignment_title="Technical Drawing Exercise",
     )
     source["score"] = 0; rubric["title"] = "Changed"
     assert snapshot.review_id == "fixed-review"
@@ -89,6 +91,7 @@ def test_snapshot_is_authoritative_immutable_and_hashes_raw_uploads():
     assert snapshot.approved_rubric["title"] == "Approved"
     assert snapshot.review_response["review_id"] == snapshot.review_id
     assert snapshot.review_response["report_available"] is True
+    assert snapshot.assignment_title == "Technical Drawing Exercise"
     assert snapshot.raw_reference_bytes == b"reference"
     assert len(snapshot.reference_sha256) == len(snapshot.student_sha256) == 64
 

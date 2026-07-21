@@ -66,7 +66,7 @@ def test_scale_invariant_correspondence_is_suspicious_not_incompatible():
     assert result.grading_withheld is True
 
 
-def test_empty_supported_geometry_is_ungradable_and_override_is_recorded():
+def test_empty_supported_geometry_is_ungradable_and_cannot_be_overridden():
     empty = assess_compatibility(
         _drawing(4), _drawing(0, unsupported=True), _comparison(), _scale()
     )
@@ -79,5 +79,5 @@ def test_empty_supported_geometry_is_ungradable_and_override_is_recorded():
     )
     assert empty.compatibility_status == "empty_or_ungradable"
     assert empty.grading_withheld is True
-    assert overridden.instructor_override is True
-    assert overridden.grading_withheld is False
+    assert overridden.instructor_override is False
+    assert overridden.grading_withheld is True

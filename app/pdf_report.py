@@ -238,6 +238,8 @@ def _styles() -> dict[str, ParagraphStyle]:
         "small": ParagraphStyle("DLSmall", parent=sample["BodyText"], fontName=FONT_NAME, fontSize=6.7, leading=8.5, textColor=colors.HexColor("#51615a")),
         "legend": ParagraphStyle("DLLegend", parent=sample["BodyText"], fontName=FONT_NAME, fontSize=5.6, leading=6.7, textColor=colors.HexColor("#51615a")),
         "score": ParagraphStyle("DLScore", parent=sample["Title"], fontName=FONT_BOLD, fontSize=27, leading=30, alignment=TA_CENTER, textColor=colors.HexColor("#125c3e")),
+        "score_earned": ParagraphStyle("DLScoreEarned", parent=sample["BodyText"], fontName=FONT_BOLD, fontSize=13, leading=15, alignment=TA_CENTER, textColor=colors.HexColor("#125c3e")),
+        "callout": ParagraphStyle("DLCallout", parent=sample["BodyText"], fontName=FONT_NAME, fontSize=7.3, leading=9.5, textColor=colors.HexColor("#163f30")),
     }
 
 
@@ -301,12 +303,16 @@ def _overlay_legend(styles: dict[str, ParagraphStyle], width: float) -> list[Flo
 
 def _metadata_table(snapshot: ReviewSnapshot, styles: dict[str, ParagraphStyle], width: float) -> Table:
     metadata = snapshot.student_metadata
+    response = snapshot.review_response
+    rubric_template = response.get("rubric_template_name") or "DraftLens Baseline Rubric"
+    rubric_source = str(response.get("rubric_source") or "baseline_template").replace("_", " ")
     return _four_column_table([
         ("Student name", metadata.student_name or "Not provided", "Student ID", metadata.student_id or "Not provided"),
         ("Course / section", metadata.course_section or "Not provided", "Report timestamp", snapshot.report_timestamp),
         ("Student DXF", _basename(snapshot.student_filename), "Reference DXF", _basename(snapshot.reference_filename)),
-        ("Assignment type", snapshot.assignment_type or "Not confirmed", "Rubric", snapshot.approved_rubric.get("title", "Applied rubric")),
-        ("Detected structure", ", ".join(snapshot.detected_features) or "No repeated structural features detected", "Report ID", snapshot.review_id[:12]),
+        ("Assignment title", snapshot.assignment_title or "Assignment", "Rubric template", rubric_template),
+        ("Assignment type", snapshot.assignment_type or "Not confirmed", "Report ID", snapshot.review_id[:12]),
+        ("Detected structure", ", ".join(snapshot.detected_features) or "No repeated structural features detected", "Rubric source", rubric_source),
     ], styles, width)
 
 
@@ -321,7 +327,20 @@ def _measurement(issue: dict[str, Any]) -> tuple[Any, Any, Any]:
 
 def _normalization_summary(snapshot: ReviewSnapshot) -> str:
     response, decision = snapshot.review_response, snapshot.normalization_decision
-    if response.get("normalization_mode", "strict") == "strict": return "Strict placement. No transform is permitted or applied."
+    if response.get("normalization_mode", "strict") == "strict":
+        displacement = decision.get("global_displacement")
+        if not displacement or not displacement.get("detected"):
+            return "Strict placement. No transform is permitted or applied."
+        return (
+            "Strict placement. No transform was applied. Robust global displacement "
+            f"evidence: displacement X={_number(displacement.get('displacement_x'))}, "
+            f"Y={_number(displacement.get('displacement_y'))}; "
+            f"magnitude {_number(displacement.get('magnitude'))}; support "
+            f"{displacement.get('support_count', 0)}/{displacement.get('evidence_count', 0)} "
+            f"({float(displacement.get('support_ratio') or 0) * 100:.1f}%); "
+            f"position tolerance {_number(displacement.get('position_tolerance'))}; "
+            f"displacement-to-tolerance ratio {_number(displacement.get('displacement_to_tolerance_ratio'))}."
+        )
     selected, candidate = decision.get("selected_translation") or [0,0], decision.get("candidate_translation") or [0,0]
     status = "accepted" if decision.get("transform_applied") else "not accepted"
     return (f"Translation-tolerant placement; transform {status}. Selected translation X={_number(selected[0])}, Y={_number(selected[1])}; "
@@ -341,13 +360,77 @@ def _issue_story(issue: dict[str, Any], styles: dict[str, ParagraphStyle], width
             ("Applied deduction",_number(issue.get("final_applied_contribution",0)),"Caps",f"rule {_number(issue.get('deduction_after_rule_cap',0))} / category {_number(issue.get('deduction_after_category_cap',0))}; {issue.get('cap_reason') or issue.get('deduction_status')}")]
     output: list[Flowable] = [CondPageBreak(55), _p(f"{issue.get('issue_id','Issue')} - {title}", styles["h2"]), _four_column_table(rows, styles, width), Spacer(1,3), _p(issue.get("technical_feedback") or "Review this finding.", styles["body"])]
     if issue.get("suppression_reason"): output.append(_p(f"Suppression reason: {issue['suppression_reason']}", styles["small"]))
-    if guidance:
-        output.extend([_p(f"Correction explanation: {guidance.get('explanation') or 'Not provided'}",styles["small"]),
-                       _p(f"Primary correction: {guidance.get('primary_command') or 'No separate correction command'}",styles["small"]),
-                       _p(f"Alternatives: {', '.join(guidance.get('alternative_commands') or []) or 'None'}",styles["small"]),
-                       _p(f"Precision aids: {', '.join(guidance.get('precision_aids') or []) or 'None'}",styles["small"])])
-        if guidance.get("related_primary_issue_id"): output.append(_p(f"Linked primary issue: {guidance['related_primary_issue_id']}",styles["small"]))
+    primary_command = guidance.get("primary_command") if issue.get("finding_role") == "primary" else None
+    if primary_command:
+        alternatives = ", ".join(guidance.get("alternative_commands") or []) or "None"
+        precision_aids = ", ".join(guidance.get("precision_aids") or []) or "None"
+        correction = Table(
+            [
+                [_p("Primary command", styles["small"]), _p(primary_command, styles["score_earned"])],
+                [_p("Alternatives", styles["small"]), _p(alternatives, styles["callout"])],
+                [_p("Precision aids", styles["small"]), _p(precision_aids, styles["callout"])],
+                [_p("Explanation", styles["small"]), _p(guidance.get("explanation") or "Not provided", styles["callout"])],
+            ],
+            colWidths=[width * .2, width * .8],
+            splitByRow=0,
+        )
+        correction.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#eff8f3")),
+            ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#2d7254")),
+            ("INNERGRID", (0, 0), (-1, -1), .3, colors.HexColor("#b8d6c7")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        output.extend([Spacer(1, 3), _p("How to correct", styles["h2"]), correction])
     output.append(Spacer(1,5)); return output
+
+
+def _finding_summary_story(
+    response: dict[str, Any],
+    styles: dict[str, ParagraphStyle],
+    width: float,
+) -> list[Flowable]:
+    presentation = response.get("finding_presentation") or {}
+    if not presentation.get("compacted"):
+        return []
+    rows = [[
+        _p("Issue type", styles["small"]),
+        _p("Counts", styles["small"]),
+        _p("Score contribution", styles["small"]),
+        _p("Cap reason", styles["small"]),
+    ]]
+    for group in presentation.get("summary_groups") or []:
+        counts = (
+            f"{group.get('total_count', 0)} total; "
+            f"{group.get('contributed_count', 0)} contributed; "
+            f"{group.get('summarized_count', 0)} summarized"
+        )
+        rows.append([
+            _p(str(group.get("issue_type") or "unknown").replace("_", " ").title(), styles["body"]),
+            _p(counts, styles["body"]),
+            _p(_number(group.get("score_contribution", 0)), styles["body"]),
+            _p(str(group.get("cap_reason") or group.get("deduction_status") or "none").replace("_", " "), styles["body"]),
+        ])
+    table = Table(rows, colWidths=[width * .24, width * .4, width * .16, width * .2], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), .35, colors.HexColor("#d6bd7d")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#fff3cf")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    totals = (
+        f"{presentation.get('total_raw_count', 0)} primary findings; "
+        f"{presentation.get('total_displayed_count', 0)} displayed; "
+        f"{presentation.get('total_summarized_count', 0)} summarized."
+    )
+    return [_p("Compact finding summary", styles["h1"]), _p(totals, styles["body"]), table, Spacer(1, 5)]
+
 
 
 def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
@@ -356,7 +439,7 @@ def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
     document = SimpleDocTemplate(output,pagesize=A4,leftMargin=16*mm,rightMargin=16*mm,topMargin=15*mm,bottomMargin=16*mm,title="DraftLens EDU Drawing Assessment Report",author="DraftLens EDU",subject=f"Authoritative review {snapshot.review_id}")
     width = A4[0]-document.leftMargin-document.rightMargin; response = snapshot.review_response; counts = response.get("finding_counts") or {}; score = response.get("score",0)
     story: list[Flowable] = [_p("DraftLens EDU",styles["title"]),_p("Drawing Assessment Report",styles["subtitle"]),_metadata_table(snapshot,styles,width),Spacer(1,6)]
-    if response.get("instructor_override"):
+    if response.get("instructor_override") is True:
         status = str(response.get("compatibility_status") or "suspicious").replace("_", " ")
         story.extend([
             _p("Instructor compatibility override", styles["h1"]),
@@ -366,25 +449,46 @@ def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
             ),
         ])
     story.append(
-        _p(f"Rubric source: {response.get('rubric_template_name', 'DraftLens baseline rubric template')} ({str(response.get('rubric_source', 'baseline_template')).replace('_', ' ')}).", styles["small"])
+        _p(f"Rubric source: {response.get('rubric_template_name', 'DraftLens Baseline Rubric')} ({str(response.get('rubric_source', 'baseline_template')).replace('_', ' ')}).", styles["small"])
     )
     score_table = Table([[_p(f"{_number(score)} / 100",styles["score"]),_p("Primary issues",styles["small"]),_p("Supporting",styles["small"]),_p("Reference notes",styles["small"]),_p("Unsupported",styles["small"])],
                          ["",_p(counts.get("primary_student_issues",0),styles["body"]),_p(counts.get("supporting_findings",0),styles["body"]),_p(counts.get("reference_validation_notes",0),styles["body"]),_p(counts.get("unsupported_entities",0),styles["body"])]],colWidths=[width*.36,width*.16,width*.16,width*.16,width*.16])
     score_table.setStyle(TableStyle([("SPAN",(0,0),(0,1)),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"CENTER"),("BACKGROUND",(0,0),(0,-1),colors.HexColor("#e8f4ed")),("GRID",(0,0),(-1,-1),.4,colors.HexColor("#cbd5d1")),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-    story.extend([score_table,_p("Score breakdown",styles["h1"])]); breakdown_rows = [[_p("Category",styles["small"]),_p("Weight",styles["small"]),_p("Earned points",styles["small"]),_p("Applied deduction",styles["small"])]]
-    for category in snapshot.score_breakdown.get("category_subtotals",[]): breakdown_rows.append([_p(category.get("name",category.get("id","Category")),styles["body"]),_p(_number(category.get("weight")),styles["body"]),_p(_number(category.get("score")),styles["body"]),_p(_number(category.get("deduction")),styles["body"])])
-    breakdown_rows.append([_p("Total",styles["body"]),_p("100",styles["body"]),_p(_number(score),styles["body"]),_p(_number(snapshot.score_breakdown.get("total_applied_deduction",0)),styles["body"])])
-    breakdown = Table(breakdown_rows,colWidths=[width*.43,width*.19,width*.19,width*.19],repeatRows=1); breakdown.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,colors.HexColor("#d8e0dc")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#edf3f0")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
+    story.extend([score_table, _p("Score breakdown", styles["h1"])])
+    breakdown_rows = [[
+        _p("Category", styles["small"]),
+        _p("Earned / available", styles["small"]),
+        _p("Applied deduction", styles["small"]),
+    ]]
+    for category in snapshot.score_breakdown.get("category_subtotals", []):
+        breakdown_rows.append([
+            _p(category.get("name", category.get("id", "Category")), styles["body"]),
+            _p(f"{_number(category.get('score'))} / {_number(category.get('weight'))}", styles["score_earned"]),
+            _p(_number(category.get("deduction")), styles["body"]),
+        ])
+    breakdown_rows.append([
+        _p("Total", styles["body"]),
+        _p(f"{_number(score)} / 100", styles["score_earned"]),
+        _p(_number(snapshot.score_breakdown.get("total_applied_deduction", 0)), styles["body"]),
+    ])
+    breakdown = Table(breakdown_rows, colWidths=[width * .48, width * .3, width * .22], repeatRows=1)
+    breakdown.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,colors.HexColor("#d8e0dc")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#edf3f0")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
     placement = "Placement policy: " + ("Translation-tolerant placement" if response.get("normalization_mode")=="translation" else "Strict placement") + f". Completion policy: {response.get('completion_scoring_mode','rule_based').replace('_',' ')}."
     reviewed_section: list[Flowable] = [_p("Reviewed drawing", styles["h1"]), *_overlay_legend(styles, width), ReviewedDrawingFlowable(snapshot.reviewed_drawing, width, 175)]
     story.extend([breakdown,_p("Placement and transform decision",styles["h1"]),_p(placement,styles["body"]),_p(_normalization_summary(snapshot),styles["small"]),KeepTogether(reviewed_section),PageBreak(),_p("Finding details",styles["title"]),_p("Findings are grouped by their authoritative role. Supporting and reference findings do not become primary deductions.",styles["subtitle"])])
+    story.extend(_finding_summary_story(response, styles, width))
     issues = list(response.get("issues") or [])
+    presentation = response.get("finding_presentation") or {}
+    if presentation.get("compacted"):
+        displayed_ids = set(presentation.get("displayed_issue_ids") or [])
+        issues = [issue for issue in issues if issue.get("issue_id") in displayed_ids]
     for role, heading in (("primary","Primary issue details"),("supporting","Supporting topology findings"),("reference","Reference notes"),("unsupported","Unsupported findings"),("informational","Informational findings")):
         selected = [issue for issue in issues if issue.get("finding_role")==role]
         if not selected and role != "primary": continue
         story.append(_p(heading,styles["h1"]))
         if not selected: story.append(_p("No student issues detected.",styles["body"]))
-        for issue in selected: story.extend(_issue_story(issue,styles,width))
+        for issue in selected:
+            story.append(KeepTogether(_issue_story(issue, styles, width)))
     unsupported = response.get("unsupported_entities") or {}; records = list(unsupported.get("reference") or [])+list(unsupported.get("student") or [])
     if records:
         story.append(_p("Unsupported entity records",styles["h1"]))

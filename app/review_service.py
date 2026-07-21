@@ -7,6 +7,8 @@ from typing import Any, Mapping
 from .analysis import analyze_assignment
 from .compatibility import CompatibilityResult, assess_compatibility
 from .compare import compare_drawings
+from .finding_presentation import compact_finding_presentation
+from .grading_adjustments import apply_acceptance_scoring
 from .dxf import parse_dxf_bytes
 from .models import Drawing
 from .reviewed_dxf import ReviewedDrawing, build_reviewed_drawing
@@ -28,6 +30,7 @@ class PipelineContractError(ValueError):
 @dataclass(slots=True)
 class GradingPipelineOutput:
     reference_id: str
+    student_fingerprint: str
     rubric_id: str | None
     rubric_source: str
     rubric: Rubric
@@ -118,10 +121,12 @@ def run_grading_pipeline(
         scale_diagnostic,
         instructor_override=instructor_override,
     )
+    apply_acceptance_scoring(comparison, selected_rubric, compatibility)
     if compatibility.grading_withheld:
         comparison = _withheld_comparison(comparison, selected_rubric)
     return GradingPipelineOutput(
         reference_id=reference_id,
+        student_fingerprint=reference_fingerprint(student_bytes),
         rubric_id=selected_id,
         rubric_source=rubric_source,
         rubric=selected_rubric,
@@ -241,21 +246,48 @@ def normalization_decision(output: GradingPipelineOutput) -> dict[str, Any]:
     requested_mode = output.rubric.normalization_mode
     record = output.comparison["normalization"]["student"]
     if requested_mode == "strict":
+        error_before = float(record.get("error_before") or 0.0)
+        displacement = dict(record.get("global_displacement") or {})
+        if not displacement.get("detected"):
+            return {
+                "requested_mode": "strict",
+                "applied_mode": "strict",
+                "transform_applied": False,
+                "selected_translation": [0.0, 0.0],
+                "candidate_translation": None,
+                "support_count": 0,
+                "evidence_count": 0,
+                "support_ratio": 0.0,
+                "confidence": "not_applicable",
+                "error_before": None,
+                "error_after": None,
+                "total_error_reduction": None,
+                "error_reduction_ratio": None,
+                "rejection_reason": None,
+            }
+        error_after = float(record.get("error_after") or 0.0)
         return {
             "requested_mode": "strict",
             "applied_mode": "strict",
             "transform_applied": False,
             "selected_translation": [0.0, 0.0],
-            "candidate_translation": None,
-            "support_count": 0,
-            "evidence_count": 0,
-            "support_ratio": 0.0,
-            "confidence": "not_applicable",
-            "error_before": None,
-            "error_after": None,
-            "total_error_reduction": None,
-            "error_reduction_ratio": None,
-            "rejection_reason": None,
+            "candidate_translation": list(
+                record.get("candidate_translation") or [0.0, 0.0]
+            ),
+            "support_count": int(record.get("support_count") or 0),
+            "evidence_count": int(record.get("evidence_count") or 0),
+            "support_ratio": float(record.get("support_ratio") or 0.0),
+            "confidence": str(record.get("confidence") or "none"),
+            "error_before": error_before,
+            "error_after": error_after,
+            "total_error_reduction": round(
+                max(0.0, error_before - error_after), 6
+            ),
+            "error_reduction_ratio": float(
+                record.get("error_reduction_ratio") or 0.0
+            ),
+            "rejection_reason": record.get("rejection_reason"),
+            "global_displacement": displacement,
         }
 
     selected = list(record.get("translation") or [0.0, 0.0])
@@ -291,6 +323,7 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         output.validation,
     )
     issues = _issue_payload(reviewed)
+    presentation = compact_finding_presentation(issues)
     finding_counts = _finding_counts(issues, reviewed)
     compatibility = output.compatibility.to_dict()
     scale_diagnostic = output.scale_diagnostic.to_dict()
@@ -316,6 +349,18 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         "units": reviewed.units,
         "extents": list(reviewed.extents),
         "issues": issues,
+        "finding_presentation": presentation,
+        **{
+            key: output.comparison.get(key)
+            for key in (
+                "geometry_evidence_factor",
+                "geometry_evidence_coverage",
+                "geometry_points_before_evidence_limit",
+                "geometry_points_after_evidence_limit",
+                "evidence_limit_reason",
+                "partial_completion_credit",
+            )
+        },
         "finding_counts": finding_counts,
         "student_issue_count": finding_counts["primary_student_issues"],
         "supporting_finding_count": finding_counts["supporting_findings"],
@@ -340,13 +385,24 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
     }
     if output.compatibility.instructor_override:
         response["compatibility_message"] = compatibility_message(output)
+        response["compatibility_override"] = {
+            "reference_fingerprint": output.reference_id,
+            "student_fingerprint": output.student_fingerprint,
+            "rubric_id": output.rubric_id,
+            "compatibility_status": output.compatibility.compatibility_status,
+            "review_attempt": "current_request",
+        }
     if output.compatibility.grading_withheld:
         response.update(
             {
                 "review_id": None,
                 "report_available": False,
                 "compatibility_message": compatibility_message(output),
-                "available_actions": ["choose_another_file", "grade_anyway"],
+                "available_actions": (
+                    ["choose_another_file", "grade_anyway"]
+                    if output.compatibility.compatibility_status != "empty_or_ungradable"
+                    else ["choose_another_file"]
+                ),
             }
         )
     return ReviewArtifacts(reviewed_drawing=reviewed, response=response)

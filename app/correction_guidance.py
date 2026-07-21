@@ -175,6 +175,13 @@ def correction_guidance(
 
     entity = student_entity or reference_entity
     kind = entity.kind if entity else None
+    if issue.category == "global_drawing_displacement":
+        return CorrectionGuidance(
+            "MOVE",
+            (),
+            (),
+            "Move the complete drawing by the recorded displacement vector to the approved strict-placement coordinates.",
+        )
     if issue.category == "incorrect_position":
         return CorrectionGuidance(
             "MOVE",
@@ -215,7 +222,7 @@ def correction_guidance(
     if issue.category == "extra_geometry":
         return CorrectionGuidance(
             "ERASE",
-            ("SELECTSIMILAR",),
+            (),
             (),
             "Remove the separate unmatched entity; OVERKILL is reserved for coincident duplicates.",
         )
