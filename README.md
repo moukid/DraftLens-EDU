@@ -1,65 +1,809 @@
 # DraftLens EDU
 
-DraftLens EDU is an explainable web grader for AutoCAD DXF assignments, built for the OpenAI Build Week Education track. It measures drawings deterministically, displays the evidence, applies a rubric, and can turn structured findings into pedagogical language. The model is never asked to measure geometry.
+**Explainable 2D CAD assessment that turns drawing errors into visible, evidence-based feedback.**
 
-## Quick start
+DraftLens EDU is an education-first grading and review system for 2D CAD assignments. It compares a student's DXF submission with an instructor-approved reference, applies a transparent rubric, identifies and localizes drawing errors, explains every deduction, recommends relevant AutoCAD correction commands, and exports an authoritative visual PDF report.
 
-Requires Python 3.12+.
+The project was created during **OpenAI Build Week** by **Moukid Badie**, a CAD, CG, visualization, and interior-design educator, in close collaboration with **GPT-5.6 and Codex**.
 
-```powershell
-py -3.12 -m venv .venv
-+.\.venv\Scripts\Activate.ps1
-pip install -r requirements-dev.txt
-python scripts\generate_samples.py
-uvicorn app.main:app --reload
-+```
+> DraftLens EDU does not replace the instructor. It makes grading evidence visible, consistent, reviewable, and easier to explain.
 
-Open `http://127.0.0.1:8000`. Run tests with `pytest -q`.
+---
+
+## The problem
+
+Students need frequent practice to become accurate and confident in CAD, but grading many drawing submissions is slow. A careful instructor may need to inspect lengths, angles, positions, missing entities, duplicate geometry, topology, file organization, and drawing completeness for every student file.
+
+Manual grading can also be affected by workload, fatigue, different grading sessions, and differences between instructors.
+
+DraftLens EDU addresses this by linking every score decision to explicit evidence:
+
+- reference and student entities;
+- expected and actual measurements;
+- approved tolerances;
+- rubric rules;
+- raw and applied deductions;
+- category and rule caps;
+- suppression or supporting-evidence reasons;
+- correction explanations;
+- relevant CAD commands.
+
+---
+
+## What DraftLens EDU does
+
+DraftLens EDU provides a complete instructor-controlled review workflow:
+
+1. Upload an instructor reference DXF.
+2. Review reference validation findings.
+3. Confirm the assignment title and assignment type.
+4. Review and approve the editable **DraftLens Baseline Rubric**.
+5. Select placement and completion policies.
+6. Upload a student DXF.
+7. Check whether the submission is compatible with the selected reference.
+8. Generate a deterministic score and reviewed drawing.
+9. Inspect primary issues, supporting topology evidence, measurements, deductions, and correction guidance.
+10. Switch between comparison view and the original student-only view.
+11. Export an authoritative multi-page PDF grading report.
+
+---
+
+## Final Build Week feature set
+
+### Reference and assignment control
+
+- instructor reference-DXF upload;
+- deterministic reference validation;
+- instructor-confirmed assignment title;
+- instructor-confirmed assignment type;
+- neutral assignment suggestions without automatic cultural classification;
+- editable DraftLens Baseline Rubric;
+- rubric approval and reapproval lifecycle;
+- clear rubric source and instructor-modified status.
+
+### Geometry and comparison
+
+- deterministic DXF parsing and canonical geometry construction;
+- exact and approximate entity matching;
+- strict-placement grading;
+- translation-tolerant grading;
+- accepted-transform evidence;
+- robust global-displacement diagnosis in Strict mode;
+- uniform-scale mismatch diagnosis without automatically changing student geometry;
+- reference-aware topology and endpoint-gap analysis;
+- deterministic repeated-geometry matching;
+- causal issue classification to reduce double deductions.
+
+### Grading integrity
+
+- compatibility states:
+  - `compatible`
+  - `suspicious`
+  - `incompatible`
+  - `empty_or_ungradable`
+- coherent-correspondence checks so generic geometric similarities do not establish assignment compatibility;
+- wrong-assignment submissions are withheld as **Not graded**;
+- likely global scale or unit mismatches are withheld for instructor review;
+- explicit, submission-specific **Grade anyway** override;
+- PDF export remains unavailable for withheld submissions until an instructor override;
+- compatibility warnings and overrides are recorded in the authoritative report.
+
+### Transparent scoring
+
+DraftLens EDU separates the score into:
+
+- **Geometric accuracy** — matched geometry, dimensions, placement, shape, and topology;
+- **Completion** — missing required reference geometry;
+- **File quality** — extra, duplicate, unsupported, invalid, or technically defective student geometry.
+
+The default baseline weights are:
+
+| Category | Available points |
+|---|---:|
+| Geometric accuracy | 65 |
+| Completion | 25 |
+| File quality | 10 |
+| **Total** | **100** |
+
+The rubric is editable by the instructor. Any modification requires reapproval before grading.
+
+Every scored finding can expose:
+
+- score category;
+- raw rule deduction;
+- deduction after rule cap;
+- deduction after category cap;
+- final applied contribution;
+- deduction status;
+- cap or suppression reason.
+
+### Feedback and reviewed drawing
+
+- reviewed SVG with stable issue IDs;
+- visual roles for Reference, Student, Missing, Extra, Inaccurate, Connectivity, Warning, and Critical;
+- selectable issue highlights;
+- localized measurement regions;
+- expected and actual values;
+- deviation and tolerance evidence;
+- primary, supporting, derived, suppressed, informational, and reference findings;
+- **Student only** mode showing the submitted drawing without DraftLens overlays;
+- deterministic “How to correct” guidance;
+- safe command recommendations such as `MOVE`, `LENGTHEN`, `ROTATE`, `LINE`, `ERASE`, `OVERKILL`, and `OSNAP`.
+
+DraftLens recommends useful correction commands. It does **not** claim to know which commands the student originally used.
+
+### Authoritative PDF reports
+
+- immutable review snapshots;
+- opaque review identifiers;
+- deterministic multi-page A4 reports;
+- vector reviewed drawing;
+- drawing-overlay legend;
+- prominent earned/available category scores;
+- compatibility and normalization evidence;
+- correction-guidance callouts;
+- compact presentation for large finding sets;
+- safe deterministic download filenames;
+- repeated exports from one snapshot are byte-identical;
+- generated reports reopen successfully with `pypdf`;
+- zero raster image XObjects in the reviewed drawing.
+
+---
+
+## Supported DXF entities
+
+The competition build supports these DXF entity types:
+
+- `LINE`
+- `LWPOLYLINE`
+- `POLYLINE`
+- `CIRCLE`
+- `ARC`
+- `ELLIPSE`
+- `SPLINE`
+- `TEXT`
+- `MTEXT`
+- `DIMENSION`
+
+Unsupported or ungradable entities are reported rather than silently treated as correct.
+
+Native DWG parsing is not included in this release.
+
+---
+
+## Controlled behavior examples
+
+The regression suite preserves these baseline results:
+
+| Controlled case | Expected result |
+|---|---:|
+| Basic geometry exact copy | 100 |
+| Basic geometry missing required line | 95 |
+| Incorrect length | 97 |
+| Incorrect angle | 97 |
+| Incorrect position | 97 |
+| Incorrect radius | 97 |
+| Extra entity | 98 |
+| Exact duplicate entity | 99 |
+| Complex pattern exact copy | 100 |
+| Complex pattern multi-error sample | 74 |
+| Partial recognizable interior-plan work | 20 |
+| Two moved arcs in interior plan | 97 |
+| Complete translated plan — Strict | 50 |
+| Complete translated plan — Translation-tolerant | 100 |
+| Unrelated assignment file | Not graded |
+| Uniformly scaled complete plan | Suspicious / Not graded |
+
+Supporting topology findings explain consequences such as endpoint gaps but do not receive a separate deduction when they are linked to a scored primary cause.
+
+---
 
 ## Architecture
 
-`app/dxf.py` parses LINE, LWPOLYLINE, ARC, TEXT/MTEXT, and DIMENSION entities using ezdxf. It translates each drawing's bounding-box minimum to `(0, 0)`; scale and orientation are unchanged. `app/compare.py` uses Shapely point distances plus explicit length/angle calculations and configurable tolerances. Layer names containing `WALL`, `DOOR`, `WINDOW`, and `DIMENSION` provide semantic classification. The FastAPI API validates uploads, returns issue JSON and drawing geometry, and renders a self-contained downloadable report. Vanilla JS converts normalized geometry to SVG and overlays issue locations.
+```text
+Reference DXF + Student DXF
+            │
+            ▼
+Parsing and reference validation
+            │
+            ▼
+Instructor-confirmed assignment and rubric
+            │
+            ▼
+Compatibility and scale diagnostics
+            │
+            ▼
+Normalization and deterministic matching
+            │
+            ▼
+Topology and causal issue analysis
+            │
+            ▼
+Transparent scoring and reconciliation
+            │
+            ▼
+Reviewed SVG + authoritative vector PDF
+```
 
-The issue contract includes code, category, severity, message, deduction, reference/student entity IDs, expected and actual values, and location. Rubric deductions are capped per category and the score cannot fall below zero.
+Core production modules include:
 
-## Samples and demo
+- DXF parsing and canonical geometry;
+- validation;
+- normalization;
+- deterministic matching;
+- topology analysis;
+- causal issue analysis;
+- compatibility and scale diagnostics;
+- scoring and reconciliation;
+- correction guidance;
+- reviewed SVG generation;
+- immutable review snapshots;
+- PDF generation;
+- FastAPI endpoints;
+- browser UI.
 
-`samples/reference.dxf` is the instructor drawing. Three submissions demonstrate a perfect match, a missing wall, and door/window errors. Upload the reference with each student file, show the SVG evidence and exact deductions, adjust tolerances, then download the standalone HTML report. `sample_rubric.json` is editable and can be uploaded in the UI.
+---
 
-## GPT-5.6 and privacy
+## Deterministic grading boundary
 
-The MVP works without an API key and provides deterministic local feedback. When `OPENAI_API_KEY` is set, `app/feedback.py` calls the Responses API and falls back safely if the provider is unavailable. `.env.example` defines `OPENAI_API_KEY` and `OPENAI_MODEL=gpt-5.6` for deployment integration. A production adapter must send only the structured issue array, score, and rubric—not DXF bytes, entity coordinates, names, or other drawing content—and must instruct GPT-5.6 to explain remediation without measuring or changing deductions. Do not enable external feedback without institutional approval, disclosure, retention review, and a human appeal path.
+GPT-5.6 is **not** asked to measure geometry or calculate grades at runtime.
 
-DXFs are processed in memory and are not persisted. There is no database, authentication, analytics, or account system. Deploy behind an institution's access controls if student work is sensitive.
+Geometry is measured by deterministic code. Scores are calculated from approved rules. Compatibility decisions use deterministic evidence. The instructor retains final authority through approval and explicit override controls.
 
-## Limitations
+This boundary is intentional: AI supported the design and development process, while the released grading engine remains inspectable, reproducible, and testable.
 
-This MVP depends on conventional semantic layer names; it does not infer walls from arbitrary layers. Bounding-box translation handles global displacement but intentionally does not rotate, scale, or optimize alignment. Matching is nearest-midpoint based and best for clean 2D educational plans. Blocks, splines, hatches, 3D entities, units reconciliation, mirrored-door semantics, dimension style compliance, overlapping candidates, and binary DWG are out of scope. Instructors must review results; automated scores are evidence, not final authority.
+---
 
-## Error handling and security
+## How GPT-5.6 contributed
 
-Only `.dxf` uploads are accepted, files default to a 10 MB limit, malformed/empty/unsupported drawings return actionable 4xx errors, and invalid rubrics return 422. Configure `MAX_UPLOAD_MB` in the environment. The standalone report escapes template content and stores the raw result only as inert JSON.
+GPT-5.6 helped:
 
-## Codex usage
+- convert classroom experience into explicit product requirements;
+- challenge an early architecture that was too specific to walls, doors, and windows;
+- define grading categories, tolerances, completion, partial credit, and instructor authority;
+- identify double-deduction risks;
+- separate primary causes from secondary geometric consequences;
+- design compatibility safeguards for wrong files and global scale mismatches;
+- evaluate manual test results and question scores that were mathematically valid but educationally illogical;
+- define acceptance tests and release criteria;
+- separate the competition MVP from the longer roadmap;
+- prepare implementation instructions, documentation, and demonstration structure.
 
-Codex was used to scaffold the implementation, create synthetic DXFs, design deterministic comparison tests, build the accessible interface, and run the verification loop. Human judgment defined the grading contract and scope; generated code remains reviewable and the geometry engine is covered by unit and integration tests.
+The collaboration changed the assessment model from a final mark into an evidence-and-feedback workflow.
 
-## Judging walkthrough
+---
 
-1. Start the server and open the upload page.
-2. Grade `student_good.dxf` to establish the 100-point baseline.
-3. Grade `student_missing_wall.dxf`; click between reference and student views and inspect the issue marker.
-4. Grade `student_door_window_errors.dxf`; connect each deduction to expected/actual structured values.
-5. Change an angle tolerance and re-grade to demonstrate instructor control.
-6. Download the report, disconnect from the server, and open the HTML to prove it is standalone.
+## How Codex contributed
 
+Codex helped:
 
+- inspect and restructure the repository;
+- implement DXF parsing and canonical geometry;
+- build normalization and deterministic matching;
+- implement reference-aware topology;
+- implement causal issue classification and score reconciliation;
+- create compatibility and scale-diagnostic safeguards;
+- implement correction guidance;
+- build the reviewed SVG interface;
+- build authoritative vector PDF reports;
+- optimize a dense 1,942-entity reference from a non-terminating calculation to approximately one second of analysis;
+- create controlled DXF fixtures;
+- diagnose regressions and false-positive matching;
+- implement and run the automated test suite;
+- preserve release checkpoints through Git branches and tags.
 
+The educator remained responsible for the educational problem, assignment design, grading philosophy, manual validation, product decisions, and final scope.
 
-## Rubric approval and fallback grading
+> GPT-5.6 helped decide what should be built and why. Codex helped build, test, diagnose, and correct it.
 
-Rubric suggestions are provisional. The client must approve a rubric with `POST /api/rubric/approve`, including the `reference_id` returned by `POST /api/rubric/suggest`. Approved rubrics are associated with the SHA-256 fingerprint of the exact reference DXF. Grading selects an explicitly supplied approved `rubric_id` or the latest approved rubric associated with that fingerprint.
+---
 
-If no approved rubric exists, `POST /api/grade` returns HTTP 409. The documented 65/25/10 rubric is used only when the multipart field `allow_fallback=true` is explicitly supplied. Legacy inline rubric uploads are rejected because they bypass instructor approval. Position, length, angle, radius, dimension, and vertex tolerances come from the selected rubric; legacy tolerance form fields affect only explicit fallback mode.
+## Key Build Week decisions
 
-Rubrics are stored in process memory for Competition V1. Restarting the FastAPI application clears approved rubrics and reference associations, so the instructor must approve them again. Strict and translation normalization are supported by the foundation grader. Translation-and-rotation and instructor-defined transforms are rejected clearly until their deterministic transformation records are implemented.
+1. **Rejected the first architecture.**  
+   DraftLens needed to become a general 2D geometric-assessment engine rather than a hard-coded wall, door, and window detector.
+
+2. **Kept grading deterministic.**  
+   AI does not calculate the runtime grade.
+
+3. **Removed command-history surveillance.**  
+   DraftLens recommends efficient commands but does not claim to reconstruct the student’s workflow.
+
+4. **Added causal scoring.**  
+   Secondary consequences do not automatically become repeated deductions.
+
+5. **Made compatibility a grading precondition.**  
+   The system does not blindly produce a plausible score for every DXF.
+
+6. **Separated scale diagnosis from automatic correction.**  
+   A likely unit or scale mismatch is identified and withheld for instructor review.
+
+7. **Kept the instructor in control.**  
+   Assignment confirmation, rubric approval, placement policy, and explicit override remain instructor decisions.
+
+8. **Prioritized explainability over feature count.**  
+   The competition release includes PDF reporting but defers reviewed-DXF export, authentication, persistence, and batch analytics.
+
+---
+
+## Prior art and positioning
+
+Automated CAD grading has academic prior art. DraftLens EDU does not claim to be the first CAD autograder.
+
+Its focus is the complete educational workflow:
+
+```text
+Instructor intent
+→ approved assignment and rubric
+→ compatibility protection
+→ deterministic evidence
+→ transparent scoring
+→ exact spatial feedback
+→ correction guidance
+→ improved next attempt
+```
+
+---
+
+## Technology stack
+
+- Python 3.12
+- FastAPI 0.116.1
+- Uvicorn 0.35.0
+- ezdxf 1.4.2
+- Shapely 2.1.1
+- ReportLab 4.5.1
+- Pillow 12.3.0 — required transitively by ReportLab; not imported by DraftLens production modules
+- pypdf 6.14.2 — report verification
+- pytest 8.4.1
+- JavaScript
+- HTML
+- CSS
+- SVG
+- OpenAI Codex
+- GPT-5.6
+
+---
+
+## Installation
+
+### Supported environment
+
+The competition build was developed and tested on:
+
+- Windows 10/11
+- Python 3.12
+
+### Clone
+
+Use the green **Code** button on the GitHub repository page, copy the HTTPS URL, and clone the repository.
+
+After cloning:
+
+```powershell
+cd DraftLens-EDU
+```
+
+### Create a virtual environment
+
+PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Command Prompt:
+
+```bat
+py -3.12 -m venv .venv
+.venv\Scripts\activate.bat
+```
+
+### Install runtime dependencies
+
+```powershell
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+For development and test dependencies:
+
+```powershell
+pip install -r requirements-dev.txt
+```
+
+### Run
+
+```powershell
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000
+```
+
+---
+
+## Included sample set
+
+The repository contains four anonymized sample families:
+
+```text
+samples/
+├─ basic_geometry/
+│  ├─ reference.dxf
+│  ├─ student_missing_line.dxf
+│  ├─ student_should_score_100.dxf
+│  └─ expected_result.md
+│
+├─ complex_pattern/
+│  ├─ reference_complex_pattern.dxf
+│  ├─ student_complex_pattern_multi_error.dxf
+│  ├─ student_complex_pattern_score_100.dxf
+│  ├─ student_complex_pattern_translated.dxf
+│  └─ expected_result.md
+│
+├─ interior_plan/
+│  ├─ reference_clean.dxf
+│  ├─ student_two_moved_arcs.dxf
+│  ├─ whole_plan_translated.dxf
+│  └─ expected_result.md
+│
+└─ incompatible/
+   ├─ reference_Interior_Plan_CLEAN_108_Entities.dxf
+   ├─ wrong_assignment.dxf
+   └─ expected_result.md
+```
+
+The `expected_result.md` file inside each folder records the verified outcome, placement policy, score, finding counts, and PDF behavior for that sample family.
+
+The complex-pattern multi-error sample is intentionally advanced. It demonstrates repeated-geometry analysis, rule-repeat caps, compact issue summaries, multiple issue types, and supporting topology evidence. It is not intended to represent one isolated student mistake.
+
+---
+
+## Judge quick test
+
+The repository includes anonymized DXF samples under `samples/`.
+
+### Test A — basic geometry exact copy
+
+Use:
+
+```text
+Reference:
+samples/basic_geometry/reference.dxf
+
+Student:
+samples/basic_geometry/student_should_score_100.dxf
+```
+
+Expected:
+
+```text
+Compatibility: Compatible
+Score: 100 / 100
+Primary issues: 0
+PDF report: Available
+```
+
+### Test B — basic geometry missing line
+
+Use:
+
+```text
+Reference:
+samples/basic_geometry/reference.dxf
+
+Student:
+samples/basic_geometry/student_missing_line.dxf
+```
+
+Expected:
+
+```text
+Compatibility: Compatible
+Score: 95 / 100
+Primary issue: Missing Geometry
+Completion deduction: 5 points
+PDF report: Available
+```
+
+### Test C — complex pattern exact copy
+
+Use:
+
+```text
+Reference:
+samples/complex_pattern/reference_complex_pattern.dxf
+
+Student:
+samples/complex_pattern/student_complex_pattern_score_100.dxf
+```
+
+Expected:
+
+```text
+Compatibility: Compatible
+Score: 100 / 100
+Primary issues: 0
+Supporting findings: 0
+PDF report: Available
+```
+
+### Test D — complex pattern multi-error analysis
+
+Use:
+
+```text
+Reference:
+samples/complex_pattern/reference_complex_pattern.dxf
+
+Student:
+samples/complex_pattern/student_complex_pattern_multi_error.dxf
+```
+
+Verified result:
+
+```text
+Compatibility: Compatible
+Score: 74 / 100
+Primary findings: 60
+Supporting findings: 20
+Geometric accuracy: 44 / 65
+Completion: 20 / 25
+File quality: 10 / 10
+PDF report: Available, 8 pages
+```
+
+This sample intentionally contains multiple changes. It demonstrates:
+
+- 57 Incorrect Position findings;
+- a Missing Geometry finding;
+- Incorrect Length findings;
+- rule-repeat caps;
+- compact finding summaries;
+- supporting endpoint-gap evidence that is not deducted again.
+
+### Test E — complex pattern global translation
+
+Use:
+
+```text
+Reference:
+samples/complex_pattern/reference_complex_pattern.dxf
+
+Student:
+samples/complex_pattern/student_complex_pattern_translated.dxf
+```
+
+Expected under Strict placement:
+
+```text
+Compatibility: Compatible
+Score: 50 / 100
+One Global Drawing Displacement issue
+Detected displacement: X = 75, Y = -40
+```
+
+The interior-plan translation sample below is the preferred quick demonstration because it is visually easier to explain.
+
+### Test F — interior-plan placement policy
+
+Use:
+
+```text
+Reference:
+samples/interior_plan/reference_clean.dxf
+
+Student:
+samples/interior_plan/whole_plan_translated.dxf
+```
+
+Expected:
+
+```text
+Strict placement:
+Compatible
+Score: 50 / 100
+One Global Drawing Displacement issue
+Detected displacement: X = 100, Y = -50
+
+Translation-tolerant placement:
+Compatible
+Score: 100 / 100
+Accepted translation displayed
+```
+
+### Test G — two moved arcs
+
+Use:
+
+```text
+Reference:
+samples/interior_plan/reference_clean.dxf
+
+Student:
+samples/interior_plan/student_two_moved_arcs.dxf
+```
+
+Expected:
+
+```text
+Compatibility: Compatible
+Score: 97 / 100
+Primary issues: 1
+Supporting findings: 2
+Applied deduction: 3 points
+PDF report: Available
+```
+
+### Test H — wrong-assignment protection
+
+Use:
+
+```text
+Reference:
+samples/incompatible/reference_Interior_Plan_CLEAN_108_Entities.dxf
+
+Student:
+samples/incompatible/wrong_assignment.dxf
+```
+
+Expected:
+
+```text
+Compatibility: Incompatible
+Confidence: High
+Score: Not graded
+Primary issues: 0
+Supporting findings: 0
+Reviewed snapshot: Not created
+PDF report: Unavailable before explicit Grade anyway override
+```
+
+### Manual workflow
+
+1. Start the application.
+2. Upload the reference DXF.
+3. Confirm the assignment title and assignment type.
+4. Review and approve the rubric.
+5. Select placement and completion policies.
+6. Upload the student DXF.
+7. Run the review.
+8. Inspect the compatibility result and score.
+9. Select an issue card.
+10. Review measurements, deductions, and “How to correct” guidance.
+11. Switch between **Review comparison** and **Student only**.
+12. Download the PDF report.
+13. Confirm that browser and PDF scores match.
+
+---
+
+## Automated tests
+
+Run:
+
+```powershell
+pytest -q
+```
+
+Final verified release:
+
+```text
+304 passed
+0 failed
+0 skipped
+0 xfailed
+0 xpassed
+```
+
+Seven warnings are third-party `PyparsingDeprecationWarning` messages originating from `ezdxf/queryparser.py`. They do not currently affect DraftLens runtime behavior.
+
+Manual sample verification also confirmed:
+
+- basic exact copy: 100 / 100;
+- basic missing line: 95 / 100;
+- complex exact copy: 100 / 100;
+- complex multi-error: 74 / 100 with 60 primary and 20 supporting findings;
+- translated interior plan under Strict placement: 50 / 100;
+- two moved arcs: 97 / 100 with two non-scoring supporting topology findings;
+- unrelated assignment file: Incompatible and Not graded.
+
+Additional verified gates:
+
+- Python compilation passed for 45 files;
+- JavaScript syntax validation passed;
+- `pip check` reported no broken requirements;
+- `git diff --check` passed.
+
+---
+
+## Release information
+
+```text
+Release branch:
+release/competition-v2
+
+Verified code commit:
+1f57c6f0cd06816ff072504b0099fa8e0e5a6d96
+
+Verified code tag:
+draftlens-edu-code-final-v2
+```
+
+The final documentation and sample-data commit may have a later commit hash. The code tag above identifies the exact production checkpoint that passed the 304-test verification gate.
+
+---
+
+## Current limitations
+
+The competition release does not include:
+
+- native DWG parsing;
+- automatic drawing-time extraction;
+- command-history tracking;
+- plagiarism detection;
+- LMS or Excel synchronization;
+- batch grading or class analytics;
+- a database;
+- authentication;
+- persistent rubric or review storage;
+- multi-user or multi-worker synchronization;
+- automatic global rotation alignment;
+- automatic scale correction;
+- native reviewed-DXF export;
+- complete support for every DXF entity;
+- production Arabic right-to-left shaping in PDF reports;
+- fully autonomous AI grading.
+
+Additional notes:
+
+- rubric and review state are held in memory;
+- review snapshots expire and are bounded by time, count, and memory;
+- scale mismatch is diagnosed but the submitted geometry is not automatically changed;
+- unsupported entities are reported rather than silently graded;
+- instructor review remains mandatory.
+
+---
+
+## Roadmap
+
+- reviewed DXF with dedicated feedback layers;
+- native DWG support and drawing-time metadata;
+- persistent database and authenticated instructor accounts;
+- batch grading and class analytics;
+- LMS and Excel integration;
+- plagiarism and similarity analysis;
+- rubric library and assignment-specific templates;
+- English and Arabic feedback;
+- learning-outcome and next-assignment guidance;
+- Autodesk Platform Services integration;
+- expansion to 3D modelling, rendering, visualization, and other CG disciplines.
+
+---
+
+## Privacy and academic responsibility
+
+- use anonymized student identifiers;
+- do not publish real student work without permission;
+- treat DraftLens EDU as instructor decision support;
+- preserve instructor approval and override records;
+- validate the reference assignment before grading;
+- verify high-stakes grades manually before official publication.
+
+---
+
+## License
+
+This repository is licensed under the MIT License. See [`LICENSE`](LICENSE).
+
+---
+
+## Creator
+
+**Moukid Badie**  
+CAD, CG, visualization, interior-design, and AI educator  
+Egypt
