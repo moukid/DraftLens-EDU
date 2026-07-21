@@ -149,7 +149,7 @@ async def grade(
         result["compatibility_message"] = message
         result["available_actions"] = (
             ["choose_another_file", "grade_anyway"]
-            if output.compatibility.status != "empty_or_ungradable"
+            if output.compatibility.compatibility_status != "empty_or_ungradable"
             else ["choose_another_file"]
         )
         result["feedback"] = [message]

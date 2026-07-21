@@ -8,11 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfReader
 
-from app.main import app
+from app.main import REVIEW_SNAPSHOTS, app
 
 
 client = TestClient(app)
 AUDIT_II = Path(__file__).parent / "fixtures" / "simple_audit-II"
+AUDIT = Path(__file__).parent / "fixtures" / "simple_audit"
 
 
 def _plan_bytes(scale: float = 1.0, count: int = 4) -> bytes:
@@ -127,6 +128,71 @@ def test_unrelated_t_crossing_is_withheld_without_issue_flood():
     ).json()
     assert overridden["score"] is not None
     assert overridden["instructor_override"] is True
+
+
+def test_unrelated_line_heavy_submission_is_withheld_until_explicit_override():
+    reference = _plan_bytes(count=108)
+    student = (AUDIT / "03_wrong_length_73C_80_units.dxf").read_bytes()
+    _approve(reference)
+
+    grade = client.post("/api/grade", files=_files(reference, student)).json()
+    assert grade["compatibility_status"] == "incompatible"
+    assert grade["grading_status"] == "withheld"
+    assert grade["score"] is None
+    assert grade["issues"] == []
+
+    withheld = client.post("/api/review", files=_files(reference, student)).json()
+    assert withheld["compatibility_status"] == "incompatible"
+    assert withheld["grading_status"] == "withheld"
+    assert withheld["score"] is None
+    assert withheld["review_id"] is None
+    assert withheld["report_available"] is False
+    assert len(REVIEW_SNAPSHOTS) == 0
+    assert withheld["reference_supported_entity_count"] == 108
+    assert withheld["student_supported_entity_count"] == 19
+    assert withheld["confident_match_count"] > 0
+    assert withheld["coherent_reference_coverage"] < 0.05
+    assert withheld["coherent_student_coverage"] < 0.35
+    assert "raw_intrinsic_matches_lack_spatial_coherence" in (
+        withheld["compatibility_reason_codes"]
+    )
+    assert withheld["compatibility_message"].startswith(
+        "Likely wrong assignment file."
+    )
+    assert withheld["available_actions"] == [
+        "choose_another_file",
+        "grade_anyway",
+    ]
+    assert not [
+        issue
+        for issue in withheld["issues"]
+        if issue["provenance"] == "comparison"
+    ]
+
+    overridden = client.post(
+        "/api/review",
+        data={"grade_anyway": "true"},
+        files=_files(reference, student),
+    ).json()
+    assert overridden["grading_status"] == "graded"
+    assert overridden["instructor_override"] is True
+    assert overridden["report_available"] is True
+    assert len(REVIEW_SNAPSHOTS) == 1
+    pdf = client.get(f"/api/reviews/{overridden['review_id']}/report.pdf")
+    assert pdf.status_code == 200
+    text = "\n".join(
+        page.extract_text() or ""
+        for page in PdfReader(io.BytesIO(pdf.content)).pages
+    )
+    assert "Instructor compatibility override" in text
+    assert "Compatibility warning" in text
+    assert "Likely wrong assignment file" in text
+
+    exact = client.post("/api/review", files=_files(reference, reference)).json()
+    assert exact["compatibility_status"] == "compatible"
+    assert exact["instructor_override"] is False
+    assert "compatibility_override" not in exact
+
 
 
 def test_empty_student_is_not_graded():

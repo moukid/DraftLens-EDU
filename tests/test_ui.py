@@ -520,3 +520,35 @@ def test_translation_review_svg_keeps_student_geometry_in_submitted_coordinates(
     assert reference_paths
     assert student_paths
     assert reference_paths != student_paths
+
+
+def test_compatibility_card_exposes_spatial_coherence_evidence():
+    response, parser = page()
+    javascript = client.get("/static/app.js").text
+    for element_id in (
+        "compatibility-reference-entities",
+        "compatibility-student-entities",
+        "compatibility-matches",
+        "compatibility-coherent-matches",
+        "compatibility-displacement-support",
+        "compatibility-reference-coverage",
+        "compatibility-student-coverage",
+    ):
+        assert element_id in parser.elements
+    for label in (
+        "Supported reference entities",
+        "Supported student entities",
+        "Raw intrinsic matches",
+        "Spatially coherent matches",
+        "Dominant displacement support",
+        "Reference coherent coverage",
+        "Student coherent coverage",
+    ):
+        assert label in response.text
+    assert 'compatibility.compatibility_status === "incompatible"' in javascript
+    assert '"Likely wrong assignment file"' in javascript
+    assert "compatibility.coherent_match_count" in javascript
+    assert "compatibility.displacement_consensus_support" in javascript
+    assert "compatibility.coherent_reference_coverage" in javascript
+    assert "compatibility.coherent_student_coverage" in javascript
+    assert "view-student-only" in parser.elements

@@ -418,6 +418,12 @@ def compatibility_message(output: GradingPipelineOutput) -> str:
         )
     if output.compatibility.compatibility_status == "empty_or_ungradable":
         return "No supported gradeable student geometry was found in this submission."
+    if output.compatibility.compatibility_status == "incompatible":
+        return (
+            "Likely wrong assignment file. Individual entities share generic geometric "
+            "properties, but their positions and overall arrangement do not correspond "
+            "coherently to the selected reference assignment."
+        )
     return (
         "The submission does not show enough deterministic correspondence with the "
         "selected reference drawing to produce an authoritative grade."

@@ -664,13 +664,23 @@ function renderCompatibility(review) {
   const card = byId("compatibility-card");
   card.hidden = !(withheld || overridden);
   if (card.hidden) return;
-  byId("compatibility-heading").textContent = overridden ? "Compatibility overridden" : "Grading withheld";
+  const incompatible = compatibility.compatibility_status === "incompatible";
+  byId("compatibility-heading").textContent = overridden
+    ? "Compatibility overridden"
+    : incompatible ? "Likely wrong assignment file" : "Grading withheld";
   byId("compatibility-message").textContent = review.compatibility_message || "Compatibility requires instructor review.";
   byId("compatibility-status").textContent = humanize(compatibility.compatibility_status);
   byId("compatibility-confidence").textContent = humanize(compatibility.compatibility_confidence);
-  byId("compatibility-matches").textContent = String(compatibility.confident_match_count || 0);
-  byId("compatibility-reference-coverage").textContent = formatNumber(Number(compatibility.reference_match_coverage || 0) * 100) + "%";
-  byId("compatibility-student-coverage").textContent = formatNumber(Number(compatibility.student_match_coverage || 0) * 100) + "%";
+  byId("compatibility-reference-entities").textContent = String(compatibility.reference_supported_entity_count || 0);
+  byId("compatibility-student-entities").textContent = String(compatibility.student_supported_entity_count || 0);
+  const rawMatches = Number(compatibility.confident_match_count || 0);
+  const coherentMatches = Number(compatibility.coherent_match_count || 0);
+  byId("compatibility-matches").textContent = String(rawMatches);
+  byId("compatibility-coherent-matches").textContent = String(coherentMatches);
+  byId("compatibility-displacement-support").textContent =
+    String(compatibility.displacement_consensus_support || 0) + "/" + String(rawMatches);
+  byId("compatibility-reference-coverage").textContent = formatNumber(Number(compatibility.coherent_reference_coverage || 0) * 100) + "%";
+  byId("compatibility-student-coverage").textContent = formatNumber(Number(compatibility.coherent_student_coverage || 0) * 100) + "%";
   const scale = compatibility.estimated_uniform_scale;
   byId("compatibility-scale").textContent = scale ? formatNumber(scale) + "x" : "Not detected";
   byId("compatibility-reasons").textContent = (compatibility.compatibility_reason_codes || []).map(humanize).join(" / ");

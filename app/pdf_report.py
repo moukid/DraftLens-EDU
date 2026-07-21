@@ -448,6 +448,10 @@ def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
                 styles["body"],
             ),
         ])
+        if response.get("compatibility_message"):
+            story.append(
+                _p(f"Compatibility warning: {response['compatibility_message']}", styles["body"])
+            )
     story.append(
         _p(f"Rubric source: {response.get('rubric_template_name', 'DraftLens Baseline Rubric')} ({str(response.get('rubric_source', 'baseline_template')).replace('_', ' ')}).", styles["small"])
     )
