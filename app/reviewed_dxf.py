@@ -55,6 +55,12 @@ class ReviewedIssue:
     raw_deduction: float
     applied_deduction: float
     deduction_status: str
+    score_category: str | None
+    raw_rule_deduction: float
+    deduction_after_rule_cap: float
+    deduction_after_category_cap: float
+    final_applied_contribution: float
+    cap_reason: str | None
     suppression_reason: str | None
     confidence: str
     classification: str
@@ -192,11 +198,13 @@ def _deduction_number(value: Any) -> float:
 
 
 def _deduction_contract(raw_issue: dict[str, Any]) -> tuple[float, float, str, str | None]:
-    raw = _deduction_number(raw_issue.get("deduction"))
-    applied_value = raw_issue.get("applied_deduction")
+    raw = _deduction_number(raw_issue.get("raw_rule_deduction", raw_issue.get("deduction")))
+    applied_value = raw_issue.get("final_applied_contribution", raw_issue.get("applied_deduction"))
     applied = raw if applied_value is None else _deduction_number(applied_value)
     suppression_reason = raw_issue.get("suppression_reason")
-    if suppression_reason:
+    if raw_issue.get("deduction_status"):
+        status = str(raw_issue["deduction_status"])
+    elif suppression_reason:
         status = "suppressed"
     elif applied < raw:
         status = "capped"
@@ -285,6 +293,12 @@ def build_reviewed_drawing(
             raw_deduction=raw_deduction,
             applied_deduction=applied_deduction,
             deduction_status=deduction_status,
+            score_category=raw_issue.get("score_category"),
+            raw_rule_deduction=_deduction_number(raw_issue.get("raw_rule_deduction", raw_deduction)),
+            deduction_after_rule_cap=_deduction_number(raw_issue.get("deduction_after_rule_cap", applied_deduction)),
+            deduction_after_category_cap=_deduction_number(raw_issue.get("deduction_after_category_cap", applied_deduction)),
+            final_applied_contribution=_deduction_number(raw_issue.get("final_applied_contribution", applied_deduction)),
+            cap_reason=raw_issue.get("cap_reason"),
             suppression_reason=suppression_reason,
             confidence=str(raw_issue.get("confidence") or "instructor_review_required"),
             classification=str(raw_issue.get("classification") or "primary"),
@@ -315,7 +329,13 @@ def build_reviewed_drawing(
             deduction=0.0,
             raw_deduction=0.0,
             applied_deduction=0.0,
-            deduction_status="none",
+            deduction_status="informational",
+            score_category=None,
+            raw_rule_deduction=0.0,
+            deduction_after_rule_cap=0.0,
+            deduction_after_category_cap=0.0,
+            final_applied_contribution=0.0,
+            cap_reason=None,
             suppression_reason=None,
             confidence="verified",
             classification="informational",

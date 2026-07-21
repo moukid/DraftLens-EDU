@@ -11,12 +11,12 @@ from .analysis import analyze_assignment
 from .dxf import DXFParseError,parse_dxf_bytes
 from .feedback import generate_feedback
 from .pdf_report import content_disposition, generate_pdf
-from .review_service import GradingPipelineOutput, PipelineContractError, build_review_artifacts, normalization_decision, reference_fingerprint, run_grading_pipeline
+from .review_service import GradingPipelineOutput, PipelineContractError, build_review_artifacts, compatibility_message, normalization_decision, reference_fingerprint, run_grading_pipeline
 from .review_snapshot import (
     ReviewSnapshotStore, SnapshotCapacityError, SnapshotExpired, SnapshotNotFound,
     StudentMetadataError, normalize_student_metadata,
 )
-from .rubric import Rubric, default_rubric
+from .rubric import BASELINE_RUBRIC_TEMPLATE, Rubric, default_rubric, rubric_contract
 from .validator import validate_reference
 ROOT=Path(__file__).parent; templates=Environment(loader=FileSystemLoader(ROOT/"templates"),autoescape=select_autoescape())
 app=FastAPI(title="DraftLens EDU",version="0.2.0"); app.mount("/static",StaticFiles(directory=ROOT/"static"),name="static")
@@ -63,6 +63,7 @@ async def run_uploaded_pipeline(
     dimension_tolerance: float,
     radius_tolerance: float,
     rubric: UploadFile | None,
+    instructor_override: bool = False,
 ):
     reference_bytes = await read_upload(reference)
     student_bytes = await read_upload(student)
@@ -82,6 +83,7 @@ async def run_uploaded_pipeline(
             rubrics=RUBRICS,
             reference_rubrics=REFERENCE_RUBRICS,
             rubric_references=RUBRIC_REFERENCES,
+            instructor_override=instructor_override,
         )
         return UploadedPipelineResult(
             output=output,
@@ -106,10 +108,11 @@ async def grade(
     dimension_tolerance: float = Form(1),
     radius_tolerance: float = Form(1),
     rubric: UploadFile | None = File(None),
+    grade_anyway: bool = Form(False),
 ):
     uploaded = await run_uploaded_pipeline(
         reference, student, rubric_id, allow_fallback, position_tolerance,
-        length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric,
+        length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric, grade_anyway,
     )
     output = uploaded.output
     result = output.comparison
@@ -129,7 +132,21 @@ async def grade(
         "detected_features": output.analysis["detected_features"],
         "normalization_mode": output.rubric.normalization_mode,
         "normalization_decision": normalization_decision(output),
+        "grading_status": (
+            "withheld" if output.compatibility.grading_withheld else "graded"
+        ),
+        "compatibility": output.compatibility.to_dict(),
+        **output.compatibility.to_dict(),
+        "scale_diagnostic": output.scale_diagnostic.to_dict(),
+        **output.scale_diagnostic.to_dict(),
+        **rubric_contract(output.rubric),
     })
+    if output.compatibility.grading_withheld:
+        message = compatibility_message(output)
+        result["compatibility_message"] = message
+        result["available_actions"] = ["choose_another_file", "grade_anyway"]
+        result["feedback"] = [message]
+        result["ai_used"] = False
     return result
 
 
@@ -148,16 +165,19 @@ async def review(
     student_name: str | None = Form(None),
     student_id: str | None = Form(None),
     course_section: str | None = Form(None),
+    grade_anyway: bool = Form(False),
 ):
     uploaded = await run_uploaded_pipeline(
         reference, student, rubric_id, allow_fallback, position_tolerance,
-        length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric,
+        length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric, grade_anyway,
     )
     try:
         metadata = normalize_student_metadata(student_name, student_id, course_section)
     except StudentMetadataError as exc:
         raise HTTPException(422, str(exc)) from exc
     artifacts = build_review_artifacts(uploaded.output)
+    if uploaded.output.compatibility.grading_withheld:
+        return artifacts.response
     try:
         snapshot = REVIEW_SNAPSHOTS.create(
             reference_filename=uploaded.reference_filename,
@@ -220,13 +240,31 @@ async def rubric_suggest(reference: UploadFile = File(...)):
         "rubric": suggested_rubric.model_dump(),
         "provisional": True,
         "requires_instructor_approval": True,
+        **rubric_contract(suggested_rubric),
     }
 
 @app.post("/api/rubric/approve")
 def rubric_approve(request: RubricApprovalRequest):
     if request.rubric.assignment_type is None:
         raise HTTPException(422, "Instructor confirmation of the assignment type is required before rubric approval.")
-    approved = request.rubric.model_copy(update={"approved": True})
+    baseline_weights = {
+        category.id: category.weight for category in default_rubric().categories
+    }
+    submitted_weights = {
+        category.id: category.weight for category in request.rubric.categories
+    }
+    modified = request.rubric.rubric_modified_by_instructor or any(
+        abs(float(submitted_weights.get(category_id, -1)) - float(weight)) > 0.001
+        for category_id, weight in baseline_weights.items()
+    )
+    approved = request.rubric.model_copy(
+        update={
+            "approved": True,
+            "rubric_source": "instructor_modified" if modified else "baseline_template",
+            "rubric_template_name": BASELINE_RUBRIC_TEMPLATE,
+            "rubric_modified_by_instructor": modified,
+        }
+    )
     rubric_id = str(uuid.uuid4())
     RUBRICS[rubric_id] = approved
     RUBRIC_REFERENCES[rubric_id] = request.reference_id
@@ -238,6 +276,7 @@ def rubric_approve(request: RubricApprovalRequest):
         "completion_scoring_mode": approved.completion_scoring_mode,
         "normalization_mode": approved.normalization_mode,
         "rubric": approved.model_dump(),
+        **rubric_contract(approved),
     }
 @app.post("/api/report",response_class=HTMLResponse)
 async def report(payload:dict):

@@ -38,7 +38,7 @@ def _finish(entity):
         entity.centroid = (sum(xs)/len(xs), sum(ys)/len(ys))
     return entity
 
-def parse_dxf_bytes(data: bytes, source: str = "reference", normalize: bool = True) -> Drawing:
+def parse_dxf_bytes(data: bytes, source: str = "reference", normalize: bool = True, allow_empty: bool = False) -> Drawing:
     if not data:
         raise DXFParseError("The uploaded DXF is empty.")
     for encoding in ("utf-8-sig", "cp1252"):
@@ -93,7 +93,14 @@ def parse_dxf_bytes(data: bytes, source: str = "reference", normalize: bool = Tr
         if entity:
             entities.append(_finish(entity))
     if not entities:
-        raise DXFParseError("The DXF contains no supported model-space entities.")
+        if not allow_empty:
+            raise DXFParseError("The DXF contains no supported model-space entities.")
+        code = int(doc.header.get("$INSUNITS", 0) or 0)
+        return Drawing(
+            [], (0.0, 0.0, 0.0, 0.0), units=UNITS.get(code, f"code-{code}"),
+            units_code=code, unsupported_entities=unsupported,
+            normalization={"mode": "strict", "translation": [0, 0], "rotation_degrees": 0, "scale": 1},
+        )
     code = int(doc.header.get("$INSUNITS", 0) or 0)
     drawing = normalize_drawing(entities) if normalize else _drawing(entities)
     drawing.units_code, drawing.units = code, UNITS.get(code, f"code-{code}")

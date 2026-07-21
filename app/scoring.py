@@ -4,12 +4,13 @@ from collections import defaultdict
 from typing import Any
 
 from .models import Issue
-from .rubric import Rubric, rubric_rule_map
+from .rubric import CATEGORY_DEFINITIONS, Rubric, rubric_rule_map
 
 
 def _category_breakdown(
     rubric: Rubric,
     category_deductions: dict[str, float],
+    audit: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     breakdown = []
     for category in rubric.categories:
@@ -21,6 +22,13 @@ def _category_breakdown(
                 "weight": category.weight,
                 "deduction": deducted,
                 "score": round(max(0.0, category.weight - deducted), 2),
+                "definition": CATEGORY_DEFINITIONS.get(category.id, ""),
+                "deduction_evidence": [
+                    entry
+                    for entry in audit
+                    if entry.get("score_category") == category.id
+                    and entry.get("issue_id") is not None
+                ],
             }
         )
     return breakdown
@@ -34,11 +42,21 @@ def _audit_entry(
     after_rule_cap: float,
     after_category_cap: float,
     suppression_reason: str | None = None,
+    cap_reason: str | None = None,
+    deduction_status: str = "applied",
 ) -> dict[str, Any]:
+    issue.raw_rule_deduction = round(raw_deduction, 2)
+    issue.deduction_after_rule_cap = round(after_rule_cap, 2)
+    issue.deduction_after_category_cap = round(after_category_cap, 2)
+    issue.final_applied_contribution = round(after_category_cap, 2)
+    issue.deduction_status = deduction_status
+    issue.cap_reason = cap_reason
     return {
         "issue_id": issue.id,
         "primary_issue_id": issue.id if issue.classification == "primary" else None,
         "category": issue.category,
+        "finding_category": issue.category,
+        "score_category": issue.score_category,
         "classification": issue.classification,
         "rule_id": applied_rule,
         "applied_rule": applied_rule,
@@ -46,7 +64,10 @@ def _audit_entry(
         "raw_deduction": raw_deduction,
         "deduction_after_rule_cap": after_rule_cap,
         "deduction_after_category_cap": after_category_cap,
+        "final_applied_contribution": after_category_cap,
         "applied": after_category_cap,
+        "deduction_status": deduction_status,
+        "cap_reason": cap_reason,
         "derived_observations": issue.derived_evidence,
         "supporting_evidence": issue.supporting_evidence,
         "suppressed_findings": issue.suppressed_findings,
@@ -74,6 +95,7 @@ def score_issues(
         raw = float(rule.deduction if rule else 0.0)
         issue.deduction = raw
         issue.rubric_rule_id = rule.id if rule else None
+        issue.score_category = category.id if category else None
 
         suppression_reason = None
         if issue.classification != "primary":
@@ -93,6 +115,12 @@ def score_issues(
         issue.suppression_reason = suppression_reason
         if suppression_reason:
             issue.applied_deduction = 0.0
+            if not rule or issue.classification == "informational":
+                deduction_status = "informational"
+            elif issue.classification != "primary":
+                deduction_status = "not_scored"
+            else:
+                deduction_status = "suppressed"
             audit.append(
                 _audit_entry(
                     issue,
@@ -101,6 +129,7 @@ def score_issues(
                     after_rule_cap=0.0,
                     after_category_cap=0.0,
                     suppression_reason=suppression_reason,
+                    deduction_status=deduction_status,
                 )
             )
             continue
@@ -120,6 +149,20 @@ def score_issues(
         rule_deductions[rule.id] += after_category_cap
         category_deductions[category.id] += after_category_cap
         issue.applied_deduction = round(after_category_cap, 2)
+        cap_reasons = []
+        if after_rule_cap < raw:
+            cap_reasons.append("rule_repeat_cap")
+        if after_category_cap < after_rule_cap:
+            cap_reasons.append("category_cap")
+        cap_reason = ",".join(cap_reasons) or None
+        if after_category_cap == 0 and raw > 0:
+            deduction_status = "capped"
+        elif after_category_cap < raw:
+            deduction_status = "partially_applied"
+        elif after_category_cap > 0:
+            deduction_status = "applied"
+        else:
+            deduction_status = "informational"
         audit.append(
             _audit_entry(
                 issue,
@@ -127,6 +170,8 @@ def score_issues(
                 raw_deduction=raw,
                 after_rule_cap=round(after_rule_cap, 2),
                 after_category_cap=round(after_category_cap, 2),
+                cap_reason=cap_reason,
+                deduction_status=deduction_status,
             )
         )
 
@@ -143,13 +188,16 @@ def score_issues(
             if completion_category.max_deduction is not None
             else completion_category.weight
         )
-        completion_applied = min(raw_completion, completion_limit)
-        category_deductions["completion"] = completion_applied
+        remaining_completion = max(0.0, completion_limit - category_deductions["completion"])
+        completion_applied = min(raw_completion, remaining_completion)
+        category_deductions["completion"] += completion_applied
         audit.append(
             {
                 "issue_id": None,
                 "primary_issue_id": None,
                 "category": "completion",
+                "finding_category": "proportional_completion",
+                "score_category": "completion",
                 "classification": "primary",
                 "rule_id": "COMPLETION-PROPORTIONAL",
                 "applied_rule": "COMPLETION-PROPORTIONAL",
@@ -157,7 +205,14 @@ def score_issues(
                 "raw_deduction": raw_completion,
                 "deduction_after_rule_cap": raw_completion,
                 "deduction_after_category_cap": completion_applied,
+                "final_applied_contribution": completion_applied,
                 "applied": completion_applied,
+                "deduction_status": (
+                    "applied" if completion_applied else "informational"
+                ),
+                "cap_reason": (
+                    "category_cap" if completion_applied < raw_completion else None
+                ),
                 "derived_observations": [],
                 "supporting_evidence": [
                     {
@@ -171,12 +226,14 @@ def score_issues(
             }
         )
     else:
-        category_deductions["completion"] = 0.0
+        category_deductions.setdefault("completion", 0.0)
         audit.append(
             {
                 "issue_id": None,
                 "primary_issue_id": None,
                 "category": "completion",
+                "finding_category": "completion_percentage",
+                "score_category": "completion",
                 "classification": "informational",
                 "rule_id": None,
                 "applied_rule": None,
@@ -184,7 +241,10 @@ def score_issues(
                 "raw_deduction": 0.0,
                 "deduction_after_rule_cap": 0.0,
                 "deduction_after_category_cap": 0.0,
+                "final_applied_contribution": 0.0,
                 "applied": 0.0,
+                "deduction_status": "informational",
+                "cap_reason": None,
                 "derived_observations": [],
                 "supporting_evidence": [
                     {
@@ -206,6 +266,8 @@ def score_issues(
                 "issue_id": None,
                 "primary_issue_id": finding.get("primary_issue_id"),
                 "category": finding["category"],
+                "finding_category": finding["category"],
+                "score_category": None,
                 "classification": "suppressed",
                 "rule_id": None,
                 "applied_rule": None,
@@ -213,7 +275,10 @@ def score_issues(
                 "raw_deduction": 0.0,
                 "deduction_after_rule_cap": 0.0,
                 "deduction_after_category_cap": 0.0,
+                "final_applied_contribution": 0.0,
                 "applied": 0.0,
+                "deduction_status": "suppressed",
+                "cap_reason": None,
                 "derived_observations": [finding.get("observation")],
                 "supporting_evidence": [],
                 "suppressed_findings": [],
@@ -223,8 +288,10 @@ def score_issues(
 
     deduction = round(sum(category_deductions.values()), 2)
     score = max(0.0, round(100.0 - deduction, 1))
-    breakdown = _category_breakdown(rubric, category_deductions)
-    visible_applied = round(sum(float(entry["applied"]) for entry in audit), 2)
+    breakdown = _category_breakdown(rubric, category_deductions, audit)
+    visible_applied = round(
+        sum(float(entry["final_applied_contribution"]) for entry in audit), 2
+    )
     if visible_applied != deduction:
         raise RuntimeError(
             "Visible applied deductions do not reconcile with the final deduction."

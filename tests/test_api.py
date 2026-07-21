@@ -246,7 +246,7 @@ def test_review_proportional_policy_suppresses_raw_missing_rule_and_reconciles_s
  assert breakdown["total_applied_deduction"]==pytest.approx(sum(category["deduction"] for category in breakdown["category_subtotals"]))
  assert breakdown["final_score"]==body["score"]
 
-def test_review_default_suggested_rule_based_policy_applies_missing_rule_without_completion_deduction():
+def test_review_default_suggested_rule_based_policy_applies_missing_rule_to_completion():
  _,approval=_review_approve(reference_path=AUDIT_REFERENCE)
  body=_post_review(reference_path=AUDIT_REFERENCE,student_path=AUDIT_MISSING).json()
  assert approval["completion_scoring_mode"]=="rule_based"
@@ -260,7 +260,9 @@ def test_review_default_suggested_rule_based_policy_applies_missing_rule_without
  assert missing["recommended_commands"]==["LINE","COPY"]
  breakdown=body["score_breakdown"]
  completion=next(category for category in breakdown["category_subtotals"] if category["id"]=="completion")
- assert completion["deduction"]==0
+ geometry=next(category for category in breakdown["category_subtotals"] if category["id"]=="geometry")
+ assert completion["deduction"]==5
+ assert geometry["deduction"]==0
  assert breakdown["total_applied_deduction"]==5
  assert breakdown["final_score"]==body["score"]
 

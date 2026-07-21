@@ -5,11 +5,13 @@ import hashlib
 from typing import Any, Mapping
 
 from .analysis import analyze_assignment
+from .compatibility import CompatibilityResult, assess_compatibility
 from .compare import compare_drawings
 from .dxf import parse_dxf_bytes
 from .models import Drawing
 from .reviewed_dxf import ReviewedDrawing, build_reviewed_drawing
-from .rubric import Rubric, ToleranceProfile, default_rubric
+from .rubric import Rubric, ToleranceProfile, default_rubric, rubric_contract
+from .scale_diagnostics import ScaleDiagnostic, diagnose_uniform_scale
 from .svg_renderer import render_svg
 from .validator import validate_reference
 
@@ -34,6 +36,8 @@ class GradingPipelineOutput:
     validation: dict[str, Any]
     analysis: dict[str, Any]
     comparison: dict[str, Any]
+    compatibility: CompatibilityResult
+    scale_diagnostic: ScaleDiagnostic
 
     @property
     def rubric_selection(self) -> dict[str, str | None]:
@@ -64,6 +68,7 @@ def run_grading_pipeline(
     rubrics: Mapping[str, Rubric],
     reference_rubrics: Mapping[str, str],
     rubric_references: Mapping[str, str],
+    instructor_override: bool = False,
 ) -> GradingPipelineOutput:
     """Run the shared deterministic selection, parsing, validation, and grading path."""
 
@@ -77,7 +82,9 @@ def run_grading_pipeline(
             raise PipelineContractError(409, "The selected rubric is not associated with this reference drawing.")
         rubric_source = "explicit_approved" if rubric_id else "associated_approved"
     elif allow_fallback:
-        selected_rubric = default_rubric("Explicit 65/25/10 fallback").model_copy(update={"approved": True})
+        selected_rubric = default_rubric("Explicit 65/25/10 fallback").model_copy(
+            update={"approved": True, "rubric_source": "explicit_fallback"}
+        )
         selected_rubric.tolerances = ToleranceProfile(
             position=position_tolerance,
             length=length_tolerance,
@@ -99,10 +106,20 @@ def run_grading_pipeline(
         )
     normalize = selected_rubric.normalization_mode == "translation"
     reference = parse_dxf_bytes(reference_bytes, source="reference", normalize=normalize)
-    student = parse_dxf_bytes(student_bytes, source="student", normalize=normalize)
+    student = parse_dxf_bytes(student_bytes, source="student", normalize=normalize, allow_empty=True)
     validation = validate_reference(reference)
     assignment_analysis = analyze_assignment(reference)
     comparison = compare_drawings(reference, student, rubric=selected_rubric)
+    scale_diagnostic = diagnose_uniform_scale(reference, student)
+    compatibility = assess_compatibility(
+        reference,
+        student,
+        comparison,
+        scale_diagnostic,
+        instructor_override=instructor_override,
+    )
+    if compatibility.grading_withheld:
+        comparison = _withheld_comparison(comparison, selected_rubric)
     return GradingPipelineOutput(
         reference_id=reference_id,
         rubric_id=selected_id,
@@ -113,7 +130,55 @@ def run_grading_pipeline(
         validation=validation,
         analysis=assignment_analysis,
         comparison=comparison,
+        compatibility=compatibility,
+        scale_diagnostic=scale_diagnostic,
     )
+
+def _withheld_comparison(
+    comparison: dict[str, Any], rubric: Rubric
+) -> dict[str, Any]:
+    """Return non-authoritative evidence without exposing an issue flood or score."""
+
+    definitions = rubric_contract(rubric)["category_definitions"]
+    category_subtotals = [
+        {
+            "id": category.id,
+            "name": category.name,
+            "weight": category.weight,
+            "deduction": 0.0,
+            "score": None,
+            "definition": definitions.get(category.id, ""),
+            "deduction_evidence": [],
+        }
+        for category in rubric.categories
+    ]
+    return {
+        "score": None,
+        "system_score": None,
+        "deduction": 0.0,
+        "issues": [],
+        "summary": {"issue_count": 0, "by_category": {}},
+        "rubric_breakdown": category_subtotals,
+        "completion": comparison["completion"],
+        "normalization": comparison["normalization"],
+        "match_count": comparison["match_count"],
+        "matches": comparison["matches"],
+        "audit_trail": [],
+        "observations": [],
+        "suppressed_findings": [],
+        "topology": None,
+        "score_breakdown": {
+            "completion_scoring_mode": rubric.completion_scoring_mode,
+            "issues": [],
+            "suppressed_findings": [],
+            "category_subtotals": category_subtotals,
+            "total_applied_deduction": 0.0,
+            "final_score": None,
+        },
+        "tolerances": comparison["tolerances"],
+        "rubric_application": comparison["rubric_application"],
+    }
+
 
 
 VISUAL_ROLE_CLASSES: dict[str, tuple[str, ...]] = {
@@ -227,11 +292,21 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
     )
     issues = _issue_payload(reviewed)
     finding_counts = _finding_counts(issues, reviewed)
+    compatibility = output.compatibility.to_dict()
+    scale_diagnostic = output.scale_diagnostic.to_dict()
     response = {
         "score": output.comparison["score"],
+        "grading_status": (
+            "withheld" if output.compatibility.grading_withheld else "graded"
+        ),
+        "compatibility": compatibility,
+        **compatibility,
+        "scale_diagnostic": scale_diagnostic,
+        **scale_diagnostic,
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
         "rubric": output.rubric.model_dump(),
+        **rubric_contract(output.rubric),
         "suggested_assignment_type": output.analysis["suggested_assignment_type"],
         "assignment_type": output.rubric.assignment_type,
         "detected_features": output.analysis["detected_features"],
@@ -263,7 +338,34 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         },
         "svg": render_svg(reviewed),
     }
+    if output.compatibility.instructor_override:
+        response["compatibility_message"] = compatibility_message(output)
+    if output.compatibility.grading_withheld:
+        response.update(
+            {
+                "review_id": None,
+                "report_available": False,
+                "compatibility_message": compatibility_message(output),
+                "available_actions": ["choose_another_file", "grade_anyway"],
+            }
+        )
     return ReviewArtifacts(reviewed_drawing=reviewed, response=response)
+
+
+def compatibility_message(output: GradingPipelineOutput) -> str:
+    if output.scale_diagnostic.detected_scale_mismatch:
+        factor = output.scale_diagnostic.estimated_scale_factor or 1.0
+        formatted = f"{factor:.3f}".rstrip("0").rstrip(".")
+        return (
+            "Likely global scale or drawing-unit mismatch. The submitted geometry "
+            f"appears uniformly scaled by approximately {formatted}\N{MULTIPLICATION SIGN}."
+        )
+    if output.compatibility.compatibility_status == "empty_or_ungradable":
+        return "No supported gradeable student geometry was found in this submission."
+    return (
+        "The submission does not show enough deterministic correspondence with the "
+        "selected reference drawing to produce an authoritative grade."
+    )
 
 
 def build_review_response(output: GradingPipelineOutput) -> dict[str, Any]:

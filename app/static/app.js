@@ -1,6 +1,12 @@
 "use strict";
 
 const REFERENCE_ANALYSIS_TIMEOUT_MS = 30000;
+const CATEGORY_DEFINITIONS = {
+  geometry: "Matched geometry, dimensions, placement, shape, and topology.",
+  completion: "Required-reference coverage and explicitly incomplete expected geometry.",
+  quality: "Student-file hygiene: extra, duplicate, unsupported, or invalid geometry.",
+};
+
 
 const state = {
   reference: null,
@@ -32,6 +38,8 @@ const downloadReportButton = byId("download-report");
 const metadataInputs = [byId("student-metadata-name"), byId("student-metadata-id"), byId("course-section")];
 const viewReviewButton = byId("view-review-comparison");
 const viewStudentButton = byId("view-student-only");
+const gradeAnywayButton = byId("grade-anyway");
+const chooseAnotherFileButton = byId("choose-another-file");
 
 
 referenceInput.addEventListener("change", () => inspectReference(referenceInput.files[0] || null));
@@ -91,6 +99,8 @@ byId("drawing-viewport").addEventListener("click", (event) => {
 });
 viewReviewButton.addEventListener("click", () => setDrawingViewMode("review"));
 viewStudentButton.addEventListener("click", () => setDrawingViewMode("student"));
+gradeAnywayButton.addEventListener("click", () => runReview(true));
+chooseAnotherFileButton.addEventListener("click", () => studentInput.click());
 
 function uploadForm(field, file) {
   const form = new FormData();
@@ -186,6 +196,7 @@ function resetReview() {
   state.filter = "all";
   setDrawingViewMode("review");
   resetNormalizationDecision();
+  byId("compatibility-card").hidden = true;
   downloadReportButton.disabled = true;
   byId("report-status").textContent = "Generate a review to enable its authoritative report.";
 
@@ -249,6 +260,9 @@ function resetIssueSelection(message) {
     "evidence-rule",
     "evidence-deduction",
     "evidence-raw-deduction",
+    "evidence-score-category",
+    "evidence-after-rule-cap",
+    "evidence-after-category-cap",
     "evidence-deduction-status",
     "evidence-confidence",
   ].forEach((id) => { byId(id).textContent = "—"; });
@@ -398,7 +412,7 @@ function renderRubricEditor() {
     const row = document.createElement("label");
     row.className = "rubric-row";
     const name = document.createElement("span");
-    name.textContent = category.name;
+    name.textContent = category.name + " - " + (CATEGORY_DEFINITIONS[category.id] || "");
     const input = document.createElement("input");
     input.type = "number";
     input.min = "0";
@@ -413,6 +427,7 @@ function renderRubricEditor() {
       const value = Number(input.value);
       if (Number.isFinite(value) && value >= 0 && value <= 100) {
         rubric.categories[index].weight = value;
+        rubric.rubric_modified_by_instructor = true;
         rubric.categories[index].max_deduction = value;
         markRubricDirty();
       } else {
@@ -544,6 +559,9 @@ function updateReportAvailability() {
   const available = Boolean(state.review && state.review.review_id && state.review.report_available);
   downloadReportButton.disabled = state.loading || !available;
   if (available) byId("report-status").textContent = "Authoritative PDF report ready.";
+  else if (state.review && state.review.grading_status === "withheld") {
+    byId("report-status").textContent = "PDF report unavailable while grading is withheld.";
+  }
 }
 
 function downloadReport() {
@@ -552,7 +570,7 @@ function downloadReport() {
   window.location.assign("/api/reviews/" + reviewId + "/report.pdf");
 }
 
-async function runReview() {
+async function runReview(instructorOverride = false) {
   if (!canRunReview()) return;
   hideError();
   resetReview();
@@ -563,6 +581,7 @@ async function runReview() {
   form.append("student", state.student, state.student.name);
   if (state.rubricId) form.append("rubric_id", state.rubricId);
   if (fallbackInput.checked && !state.rubricId) form.append("allow_fallback", "true");
+  if (instructorOverride) form.append("grade_anyway", "true");
   const metadataFields = [["student_name", metadataInputs[0]], ["student_id", metadataInputs[1]], ["course_section", metadataInputs[2]]];
   metadataFields.forEach(([name, input]) => {
     if (input.value.trim()) form.append(name, input.value);
@@ -572,7 +591,11 @@ async function runReview() {
     state.review = await requestJson("/api/review", {method: "POST", body: form});
     renderResults(state.review);
     updateReportAvailability();
-    setWorkflowStatus("Review complete", "success");
+    if (state.review.grading_status === "withheld") {
+      setWorkflowStatus("Grading withheld - instructor review required", "warning");
+    } else {
+      setWorkflowStatus("Review complete", "success");
+    }
   } catch (error) {
     resetReview();
     showError(error);
@@ -585,7 +608,9 @@ function renderResults(review) {
   setDrawingViewMode("review");
   byId("review-placeholder").hidden = true;
   byId("review-results").hidden = false;
-  byId("result-score").textContent = formatNumber(review.score);
+  const gradingWithheld = review.grading_status === "withheld";
+  byId("result-score").textContent = gradingWithheld ? "Not graded" : formatNumber(review.score);
+  byId("result-score").nextElementSibling.hidden = gradingWithheld;
   byId("result-units").textContent = review.units || "unitless";
   byId("result-assignment-type").textContent = review.assignment_type || (review.rubric && review.rubric.assignment_type) || "Not confirmed";
   byId("result-detected-features").textContent = (review.detected_features || []).join(", ") || "No repeated structural features detected";
@@ -598,10 +623,11 @@ function renderResults(review) {
     ...((review.unsupported_entities && review.unsupported_entities.student) || []),
   ];
   byId("result-unsupported").textContent = String(counts.unsupported_entities ?? unsupported.length);
-  const source = humanize(review.rubric_selection && review.rubric_selection.source);
+  const source = (review.rubric_template_name || "DraftLens baseline rubric template") + " / " + humanize(review.rubric_source || "baseline_template");
   const completionMode = review.completion_scoring_mode || review.rubric.completion_scoring_mode || "rule_based";
   const normalizationMode = review.normalization_mode || review.rubric.normalization_mode || "strict";
   byId("result-rubric").textContent = (review.rubric.title || "Applied rubric") + " · " + source + " · " + completionPolicyLabel(completionMode) + " · " + placementModeLabel(normalizationMode);
+  renderCompatibility(review);
   renderScoreBreakdown(review, completionMode);
   renderNormalizationDecision(review);
   const critical = review.issues.filter((issue) => isPrimaryStudentIssue(issue) && issue.severity === "critical").length;
@@ -620,6 +646,27 @@ function renderResults(review) {
     resetIssueSelection(message);
   }
   byId("review-results").scrollIntoView();
+}
+
+function renderCompatibility(review) {
+  const compatibility = review.compatibility || review;
+  const withheld = review.grading_status === "withheld";
+  const overridden = Boolean(compatibility.instructor_override);
+  const card = byId("compatibility-card");
+  card.hidden = !(withheld || overridden);
+  if (card.hidden) return;
+  byId("compatibility-heading").textContent = overridden ? "Compatibility overridden" : "Grading withheld";
+  byId("compatibility-message").textContent = review.compatibility_message || "Compatibility requires instructor review.";
+  byId("compatibility-status").textContent = humanize(compatibility.compatibility_status);
+  byId("compatibility-confidence").textContent = humanize(compatibility.compatibility_confidence);
+  byId("compatibility-matches").textContent = String(compatibility.confident_match_count || 0);
+  byId("compatibility-reference-coverage").textContent = formatNumber(Number(compatibility.reference_match_coverage || 0) * 100) + "%";
+  byId("compatibility-student-coverage").textContent = formatNumber(Number(compatibility.student_match_coverage || 0) * 100) + "%";
+  const scale = compatibility.estimated_uniform_scale;
+  byId("compatibility-scale").textContent = scale ? formatNumber(scale) + "x" : "Not detected";
+  byId("compatibility-reasons").textContent = (compatibility.compatibility_reason_codes || []).map(humanize).join(" / ");
+  gradeAnywayButton.hidden = !withheld;
+  chooseAnotherFileButton.hidden = !withheld;
 }
 
 function formatTranslation(vector) {
@@ -697,10 +744,31 @@ function renderScoreBreakdown(review, completionMode) {
       "Earned " + formatNumber(category.score) + " / " + formatNumber(category.weight) +
       " · Applied " + formatDeduction(category.deduction);
     row.append(name, detail);
-    container.append(row);
+    const definition = document.createElement("p");
+    definition.className = "score-category-definition";
+    definition.textContent = category.definition || "";
+    const explanation = document.createElement("details");
+    explanation.className = "score-category-evidence";
+    const summary = document.createElement("summary");
+    summary.textContent = "Why points were deducted";
+    explanation.append(summary);
+    const evidence = category.deduction_evidence || [];
+    if (!evidence.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "No scored findings contributed to this category.";
+      explanation.append(empty);
+    } else {
+      evidence.forEach((entry) => {
+        const item = document.createElement("p");
+        const reason = entry.cap_reason || entry.suppression_reason || entry.deduction_status;
+        item.textContent = (entry.issue_id || "Policy") + " / " + (entry.rule_id || "No rule") + " / " + humanize(entry.score_category) + " / raw " + formatDeduction(entry.raw_deduction) + " / final " + formatDeduction(entry.final_applied_contribution) + " / " + humanize(reason);
+        explanation.append(item);
+      });
+    }
+    container.append(row, definition, explanation);
   });
   byId("result-applied-deduction").textContent = formatDeduction(breakdown.total_applied_deduction);
-  byId("result-final-score").textContent = formatNumber(breakdown.final_score) + " / 100";
+  byId("result-final-score").textContent = breakdown.final_score === null ? "Not graded" : formatNumber(breakdown.final_score) + " / 100";
   byId("result-policy").textContent = completionPolicyLabel(completionMode) + ". " + completionPolicyDescription(completionMode);
 }
 
@@ -843,6 +911,9 @@ function renderFeedback(issue) {
   byId("evidence-rule").textContent = issue.rubric_rule_id || "Validation finding";
   byId("evidence-deduction").textContent = formatDeduction(appliedDeduction(issue));
   byId("evidence-raw-deduction").textContent = formatDeduction(rawDeduction(issue));
+  byId("evidence-score-category").textContent = humanize(issue.score_category || "not_scored");
+  byId("evidence-after-rule-cap").textContent = formatDeduction(issue.deduction_after_rule_cap);
+  byId("evidence-after-category-cap").textContent = formatDeduction(issue.deduction_after_category_cap);
   byId("evidence-deduction-status").textContent = deductionStatusText(issue);
   byId("evidence-confidence").textContent = humanize(issue.confidence);
 
@@ -914,18 +985,17 @@ function formatEvidenceValue(value) {
 }
 
 function appliedDeduction(issue) {
-  return Number(issue.applied_deduction ?? issue.deduction ?? 0);
+  return Number(issue.final_applied_contribution ?? issue.applied_deduction ?? issue.deduction ?? 0);
 }
 
 function rawDeduction(issue) {
-  return Number(issue.raw_deduction ?? issue.deduction ?? 0);
+  return Number(issue.raw_rule_deduction ?? issue.raw_deduction ?? issue.deduction ?? 0);
 }
 
 function deductionStatusText(issue) {
   if (issue.suppression_reason) return "Suppressed: " + issue.suppression_reason;
-  if (issue.deduction_status === "capped") return "Capped by rubric limits";
-  if (appliedDeduction(issue) > 0) return "Applied";
-  return "Not scored";
+  const status = humanize(issue.deduction_status || (appliedDeduction(issue) > 0 ? "applied" : "not_scored"));
+  return issue.cap_reason ? status + ": " + humanize(issue.cap_reason) : status;
 }
 
 function formatDeductionDetail(issue) {

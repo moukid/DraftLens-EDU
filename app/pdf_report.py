@@ -337,8 +337,8 @@ def _issue_story(issue: dict[str, Any], styles: dict[str, ParagraphStyle], width
             ("Expected entity",issue.get("expected_entity_id"),"Student entity",issue.get("source_entity_id")),
             ("Expected measurement",_number(expected),"Actual measurement",_number(actual)),
             ("Deviation",_number(deviation),"Rubric rule",issue.get("rubric_rule_id") or "None"),
-            ("Raw deduction",_number(issue.get("raw_deduction",0)),"Applied deduction",_number(issue.get("applied_deduction",0))),
-            ("Deduction status",issue.get("deduction_status"),"Confidence",issue.get("confidence"))]
+            ("Score category",issue.get("score_category") or "Not scored","Raw deduction",_number(issue.get("raw_rule_deduction",0))),
+            ("Applied deduction",_number(issue.get("final_applied_contribution",0)),"Caps",f"rule {_number(issue.get('deduction_after_rule_cap',0))} / category {_number(issue.get('deduction_after_category_cap',0))}; {issue.get('cap_reason') or issue.get('deduction_status')}")]
     output: list[Flowable] = [CondPageBreak(55), _p(f"{issue.get('issue_id','Issue')} - {title}", styles["h2"]), _four_column_table(rows, styles, width), Spacer(1,3), _p(issue.get("technical_feedback") or "Review this finding.", styles["body"])]
     if issue.get("suppression_reason"): output.append(_p(f"Suppression reason: {issue['suppression_reason']}", styles["small"]))
     if guidance:
@@ -356,6 +356,18 @@ def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
     document = SimpleDocTemplate(output,pagesize=A4,leftMargin=16*mm,rightMargin=16*mm,topMargin=15*mm,bottomMargin=16*mm,title="DraftLens EDU Drawing Assessment Report",author="DraftLens EDU",subject=f"Authoritative review {snapshot.review_id}")
     width = A4[0]-document.leftMargin-document.rightMargin; response = snapshot.review_response; counts = response.get("finding_counts") or {}; score = response.get("score",0)
     story: list[Flowable] = [_p("DraftLens EDU",styles["title"]),_p("Drawing Assessment Report",styles["subtitle"]),_metadata_table(snapshot,styles,width),Spacer(1,6)]
+    if response.get("instructor_override"):
+        status = str(response.get("compatibility_status") or "suspicious").replace("_", " ")
+        story.extend([
+            _p("Instructor compatibility override", styles["h1"]),
+            _p(
+                f"Compatibility was classified as {status}. The instructor explicitly selected Grade anyway; the numerical result below records that override.",
+                styles["body"],
+            ),
+        ])
+    story.append(
+        _p(f"Rubric source: {response.get('rubric_template_name', 'DraftLens baseline rubric template')} ({str(response.get('rubric_source', 'baseline_template')).replace('_', ' ')}).", styles["small"])
+    )
     score_table = Table([[_p(f"{_number(score)} / 100",styles["score"]),_p("Primary issues",styles["small"]),_p("Supporting",styles["small"]),_p("Reference notes",styles["small"]),_p("Unsupported",styles["small"])],
                          ["",_p(counts.get("primary_student_issues",0),styles["body"]),_p(counts.get("supporting_findings",0),styles["body"]),_p(counts.get("reference_validation_notes",0),styles["body"]),_p(counts.get("unsupported_entities",0),styles["body"])]],colWidths=[width*.36,width*.16,width*.16,width*.16,width*.16])
     score_table.setStyle(TableStyle([("SPAN",(0,0),(0,1)),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"CENTER"),("BACKGROUND",(0,0),(0,-1),colors.HexColor("#e8f4ed")),("GRID",(0,0),(-1,-1),.4,colors.HexColor("#cbd5d1")),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))

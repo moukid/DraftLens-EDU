@@ -134,8 +134,10 @@ def test_missing_line_issue_location_matches_expected_geometry(audit_outputs):
     )
 
 
-def test_missing_line_does_not_reduce_completion_in_addition_to_rule(audit_outputs):
-    assert breakdown(audit_outputs, MISSING, "completion")["deduction"] == 0
+def test_missing_line_deducts_from_completion_without_a_second_geometry_charge(audit_outputs):
+    assert breakdown(audit_outputs, MISSING, "completion")["deduction"] == 5
+    assert breakdown(audit_outputs, MISSING, "geometry")["deduction"] == 0
+    assert audit_outputs[MISSING].comparison["score"] == 95
 
 
 def test_missing_line_current_five_point_rule_produces_score_95(audit_outputs):

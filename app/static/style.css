@@ -630,6 +630,29 @@ footer {
   font-size: 11px;
 }
 
+.compatibility-card {
+  border: 1px solid #d69e2e;
+  background: #fffaf0;
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+.compatibility-evidence {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.compatibility-evidence div { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.compatibility-evidence dt { color: var(--muted); font-size: 10px; }
+.compatibility-evidence dd { margin: 3px 0 0; font-weight: 700; }
+.compatibility-actions { display: flex; gap: 8px; }
+.compatibility-actions .primary-button { width: auto; margin: 0; }
+.score-category-definition { margin: -2px 0 2px; color: var(--muted); font-size: 10px; }
+.score-category-evidence { border-bottom: 1px solid var(--line); padding-bottom: 6px; font-size: 10px; }
+.score-category-evidence summary { cursor: pointer; font-weight: 700; color: var(--green); }
+.score-category-evidence p { margin: 4px 0; color: var(--muted); }
+
 @media (max-width: 1120px) {
   .workspace { grid-template-columns: 330px minmax(0, 1fr); }
   .results-bar { grid-template-columns: 1fr; gap: 12px; }

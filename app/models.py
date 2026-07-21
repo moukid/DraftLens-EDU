@@ -79,6 +79,20 @@ class Issue:
     suppressed_findings: list[dict[str, Any]] = field(default_factory=list)
     suppression_reason: str | None = None
     status: Literal["accepted", "rejected"] = "accepted"
+    score_category: str | None = None
+    raw_rule_deduction: float = 0.0
+    deduction_after_rule_cap: float = 0.0
+    deduction_after_category_cap: float = 0.0
+    final_applied_contribution: float = 0.0
+    deduction_status: Literal[
+        "applied",
+        "partially_applied",
+        "capped",
+        "suppressed",
+        "informational",
+        "not_scored",
+    ] = "not_scored"
+    cap_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
