@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from statistics import median
 from typing import Any
+from shapely.geometry import LineString
 from .causal_analysis import CausalFinding, analyze_comparison
 from .correction_guidance import correction_guidance
 from .dxf import entity_length
@@ -41,12 +42,17 @@ def _freeze(value: Any) -> Any:
     return value
 
 
-def _canonical_points(entity: Entity, *, relative: bool) -> tuple[tuple[float, float], ...]:
+def _canonical_points(
+    entity: Entity,
+    *,
+    relative: bool,
+    precision: int = GEOMETRY_PRECISION,
+) -> tuple[tuple[float, float], ...]:
     points = [(float(x), float(y)) for x, y in entity.points]
     if relative and points:
         anchor_x, anchor_y = _center(entity)
         points = [(x - anchor_x, y - anchor_y) for x, y in points]
-    rounded = [(_rounded(x), _rounded(y)) for x, y in points]
+    rounded = [(round(x, precision), round(y, precision)) for x, y in points]
     if entity.kind == "line" and len(rounded) == 2:
         rounded.sort()
     elif entity.closed and rounded:
@@ -60,15 +66,20 @@ def _canonical_points(entity: Entity, *, relative: bool) -> tuple[tuple[float, f
     return tuple(rounded)
 
 
-def _geometry_signature(entity: Entity, *, relative: bool) -> tuple[Any, ...]:
+def _geometry_signature(
+    entity: Entity,
+    *,
+    relative: bool,
+    precision: int = GEOMETRY_PRECISION,
+) -> tuple[Any, ...]:
     return (
         entity.kind,
         entity.layer,
-        _canonical_points(entity, relative=relative),
-        _rounded(entity.radius),
-        _rounded(entity.start_angle),
-        _rounded(entity.end_angle),
-        _rounded(entity.measurement),
+        _canonical_points(entity, relative=relative, precision=precision),
+        None if entity.radius is None else round(float(entity.radius), precision),
+        None if entity.start_angle is None else round(float(entity.start_angle), precision),
+        None if entity.end_angle is None else round(float(entity.end_angle), precision),
+        None if entity.measurement is None else round(float(entity.measurement), precision),
         entity.closed,
         entity.text,
         _freeze(entity.properties),
@@ -76,11 +87,16 @@ def _geometry_signature(entity: Entity, *, relative: bool) -> tuple[Any, ...]:
 
 
 def _group_by_signature(
-    entities: list[Entity], *, relative: bool
+    entities: list[Entity],
+    *,
+    relative: bool,
+    precision: int = GEOMETRY_PRECISION,
 ) -> dict[tuple[Any, ...], list[Entity]]:
     groups: dict[tuple[Any, ...], list[Entity]] = defaultdict(list)
     for entity in entities:
-        groups[_geometry_signature(entity, relative=relative)].append(entity)
+        groups[
+            _geometry_signature(entity, relative=relative, precision=precision)
+        ].append(entity)
     for group in groups.values():
         group.sort(key=lambda entity: entity.id)
     return groups
@@ -200,10 +216,17 @@ def _minimum_cost_pairs(
 
 
 def _intrinsic_entity_pairs(
-    reference_entities: list[Entity], student_entities: list[Entity]
+    reference_entities: list[Entity],
+    student_entities: list[Entity],
+    *,
+    precision: int = GEOMETRY_PRECISION,
 ) -> list[tuple[Entity, Entity]]:
-    reference_groups = _group_by_signature(reference_entities, relative=True)
-    student_groups = _group_by_signature(student_entities, relative=True)
+    reference_groups = _group_by_signature(
+        reference_entities, relative=True, precision=precision
+    )
+    student_groups = _group_by_signature(
+        student_entities, relative=True, precision=precision
+    )
     pairs: list[tuple[Entity, Entity]] = []
     for signature in sorted(reference_groups, key=repr):
         pairs.extend(
@@ -435,23 +458,196 @@ def _angle_delta(a: float, b: float) -> float:
 def _distance(a: Entity, b: Entity) -> float:
     return math.dist(_center(a), _center(b))
 
-def _compatible(a: Entity, b: Entity) -> bool:
+def _compatible(a: Entity, b: Entity, *, exact_kind: bool = False) -> bool:
     if a.kind == b.kind:
         return True
+    if exact_kind:
+        return False
     return {a.kind, b.kind} <= {"line", "polyline"}
 
-def _candidate_cost(reference: Entity, student: Entity) -> float:
+
+def _polyline_curve_centroid(points: list[tuple[float, float]], *, closed: bool) -> tuple[float, float]:
+    n = len(points)
+    if n <= 1:
+        return (float(points[0][0]), float(points[0][1])) if points else (0.0, 0.0)
+    num_segs = n if closed else n - 1
+    total_len = 0.0
+    cx, cy = 0.0, 0.0
+    for i in range(num_segs):
+        p1 = points[i]
+        p2 = points[(i + 1) % n]
+        seg_len = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+        total_len += seg_len
+        cx += seg_len * (p1[0] + p2[0]) / 2.0
+        cy += seg_len * (p1[1] + p2[1]) / 2.0
+    if total_len > 1e-9:
+        return (cx / total_len, cy / total_len)
+    return (float(points[0][0]), float(points[0][1]))
+
+
+def _polyline_characteristic_radius(points: list[tuple[float, float]]) -> float:
+    if not points:
+        return 1e-9
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    diag = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+    return max(diag / 2.0, 1e-9)
+
+
+def _intrinsic_match_quality(reference_entity: Entity, student_entity: Entity) -> float:
+    if reference_entity.kind != student_entity.kind:
+        return 0.0
+
+    layer_sim = 1.0 if reference_entity.layer == student_entity.layer else 0.85
+
+    if reference_entity.kind == "line":
+        lr = entity_length(reference_entity)
+        ls = entity_length(student_entity)
+        len_sim = max(0.0, 1.0 - abs((lr or 0.0) - (ls or 0.0)) / max(lr or 0.0, ls or 0.0, 1e-9))
+        ar = _angle(reference_entity)
+        as_ = _angle(student_entity)
+        if ar is not None and as_ is not None:
+            delta = _angle_delta(ar, as_)
+            ang_sim = max(0.0, 1.0 - delta / 90.0)
+        else:
+            ang_sim = 1.0
+        return len_sim * ang_sim * layer_sim
+
+    if reference_entity.kind == "circle":
+        rr = reference_entity.radius or 0.0
+        rs = student_entity.radius or 0.0
+        rad_sim = max(0.0, 1.0 - abs(rr - rs) / max(rr, rs, 1e-9))
+        return rad_sim * layer_sim
+
+    if reference_entity.kind == "arc":
+        rr = reference_entity.radius or 0.0
+        rs = student_entity.radius or 0.0
+        rad_sim = max(0.0, 1.0 - abs(rr - rs) / max(rr, rs, 1e-9))
+
+        ref_span = ((reference_entity.end_angle or 0.0) - (reference_entity.start_angle or 0.0)) % 360.0
+        if ref_span == 0.0:
+            ref_span = 360.0
+        stu_span = ((student_entity.end_angle or 0.0) - (student_entity.start_angle or 0.0)) % 360.0
+        if stu_span == 0.0:
+            stu_span = 360.0
+        span_delta = abs(ref_span - stu_span)
+        span_sim = max(0.0, 1.0 - span_delta / 360.0)
+
+        if reference_entity.start_angle is not None and student_entity.start_angle is not None:
+            start_delta = abs((reference_entity.start_angle - student_entity.start_angle) % 360.0)
+            start_delta = min(start_delta, 360.0 - start_delta)
+            ang_sim = max(0.0, 1.0 - start_delta / 180.0)
+        else:
+            ang_sim = 1.0
+
+        return rad_sim * span_sim * ang_sim * layer_sim
+
+    if reference_entity.kind == "spline":
+        closed_sim = 1.0 if reference_entity.closed == student_entity.closed else 0.5
+        lr = entity_length(reference_entity)
+        ls = entity_length(student_entity)
+        len_sim = max(0.0, 1.0 - abs((lr or 0.0) - (ls or 0.0)) / max(lr or 0.0, ls or 0.0, 1e-9))
+        vr = len(reference_entity.points)
+        vs = len(student_entity.points)
+        pts_sim = max(0.0, 1.0 - abs(vr - vs) / max(vr, vs, 1))
+        return len_sim * pts_sim * closed_sim * layer_sim
+
+    if reference_entity.kind == "polyline":
+        closed_sim = 1.0 if reference_entity.closed == student_entity.closed else 0.5
+        lr = entity_length(reference_entity)
+        ls = entity_length(student_entity)
+        len_sim = max(0.0, 1.0 - abs((lr or 0.0) - (ls or 0.0)) / max(lr or 0.0, ls or 0.0, 1e-9))
+        vr = len(reference_entity.points)
+        vs = len(student_entity.points)
+
+        if vr == 2 and vs == 2 and not reference_entity.closed and not student_entity.closed:
+            ar = _angle(reference_entity)
+            as_ = _angle(student_entity)
+            if ar is not None and as_ is not None:
+                ang_sim = max(0.0, 1.0 - _angle_delta(ar, as_) / 90.0)
+            else:
+                ang_sim = 1.0
+            return len_sim * ang_sim * layer_sim * closed_sim
+
+        if vr >= 2 and vs >= 2:
+            c_r = _polyline_curve_centroid(reference_entity.points, closed=reference_entity.closed)
+            c_s = _polyline_curve_centroid(student_entity.points, closed=student_entity.closed)
+            r_ring = (
+                (reference_entity.points + [reference_entity.points[0]])
+                if reference_entity.closed and reference_entity.points[0] != reference_entity.points[-1]
+                else list(reference_entity.points)
+            )
+            s_ring = (
+                (student_entity.points + [student_entity.points[0]])
+                if student_entity.closed and student_entity.points[0] != student_entity.points[-1]
+                else list(student_entity.points)
+            )
+            r_c = [(p[0] - c_r[0], p[1] - c_r[1]) for p in r_ring]
+            s_c = [(p[0] - c_s[0], p[1] - c_s[1]) for p in s_ring]
+            try:
+                ls_r = LineString(r_c)
+                ls_s = LineString(s_c)
+                hausdorff = float(ls_r.hausdorff_distance(ls_s))
+            except Exception:
+                hausdorff = float("inf")
+            rad_r = _polyline_characteristic_radius(reference_entity.points)
+            rad_s = _polyline_characteristic_radius(student_entity.points)
+            char_rad = max(rad_r, rad_s, 1e-9)
+            shape_sim = max(0.0, 1.0 - hausdorff / char_rad)
+            return len_sim * shape_sim * closed_sim * layer_sim
+
+        pts_sim = 1.0 if vr == vs else 0.0
+        return len_sim * pts_sim * closed_sim * layer_sim
+
+    if reference_entity.kind == "text":
+        text_sim = 1.0 if reference_entity.text == student_entity.text else 0.0
+        return text_sim * layer_sim
+
+    if reference_entity.kind == "dimension":
+        rm = reference_entity.measurement
+        sm = student_entity.measurement
+        if rm is not None and sm is not None:
+            meas_sim = max(0.0, 1.0 - abs(rm - sm) / max(abs(rm), abs(sm), 1e-9))
+        else:
+            meas_sim = 1.0 if rm == sm else 0.5
+        return meas_sim * layer_sim
+
+    lr = entity_length(reference_entity)
+    ls = entity_length(student_entity)
+    len_sim = max(0.0, 1.0 - abs((lr or 0.0) - (ls or 0.0)) / max(lr or 0.0, ls or 0.0, 1e-9))
+    return len_sim * layer_sim
+
+
+def _candidate_cost(reference: Entity, student: Entity, *, ignore_position: bool = False) -> float:
     distance = _distance(reference, student)
     lr, ls = entity_length(reference), entity_length(student)
-    size = abs((lr or 0)-(ls or 0))
-    angle = _angle_delta(_angle(reference), _angle(student)) if _angle(reference) is not None and _angle(student) is not None else 0
-    radius = abs((reference.radius or 0)-(student.radius or 0))
-    return distance + size*0.35 + angle*0.08 + radius*0.5
+    angle = (
+        _angle_delta(_angle(reference), _angle(student))
+        if _angle(reference) is not None and _angle(student) is not None
+        else 0
+    )
+    radius = abs((reference.radius or 0) - (student.radius or 0))
+    if ignore_position:
+        size = 0.0 if reference.kind in {"circle", "arc"} else abs((lr or 0) - (ls or 0))
+        layer_penalty = 0.0 if reference.layer == student.layer else 5.0
+        return size * 0.35 + angle * 0.08 + radius * 0.5 + layer_penalty + min(distance * 0.001, 1.0)
+    size = abs((lr or 0) - (ls or 0))
+    return distance + size * 0.35 + angle * 0.08 + radius * 0.5
 
-def _match_entities(reference: Drawing, student: Drawing, tolerance: ToleranceProfile):
+
+def _match_entities(
+    reference: Drawing,
+    student: Drawing,
+    tolerance: ToleranceProfile,
+    *,
+    mode: str = "strict",
+):
     exact_pairs = _exact_entity_pairs(reference, student)
     used_r = {reference_entity.id for reference_entity, _ in exact_pairs}
     used_s = {student_entity.id for _, student_entity in exact_pairs}
+    match_qualities: dict[str, float] = {}
+    for r, s in exact_pairs:
+        match_qualities[r.id] = 1.0
     matched = [
         (reference_entity, student_entity, 1.0)
         for reference_entity, student_entity in exact_pairs
@@ -461,22 +657,30 @@ def _match_entities(reference: Drawing, student: Drawing, tolerance: TolerancePr
         reference.bbox[3] - reference.bbox[1],
         1,
     )
+    prec = 4 if mode == "translation" else GEOMETRY_PRECISION
     intrinsic_pairs = _intrinsic_entity_pairs(
         [entity for entity in reference.entities if entity.id not in used_r],
         [entity for entity in student.entities if entity.id not in used_s],
+        precision=prec,
     )
+    ignore_pos = (mode == "translation")
     for reference_entity, student_entity in intrinsic_pairs:
         used_r.add(reference_entity.id)
         used_s.add(student_entity.id)
-        cost = _candidate_cost(reference_entity, student_entity)
-        confidence = max(0.0, min(1.0, 1 - cost / (extent + 1)))
+        if ignore_pos:
+            confidence = 1.0
+            match_qualities[reference_entity.id] = 1.0
+        else:
+            cost = _candidate_cost(reference_entity, student_entity, ignore_position=False)
+            confidence = max(0.0, min(1.0, 1 - cost / (extent + 1)))
+            match_qualities[reference_entity.id] = confidence
         matched.append((reference_entity, student_entity, confidence))
     pairs = sorted(
         (
             (
-                _candidate_cost(reference_entity, student_entity),
-                _geometry_signature(reference_entity, relative=False),
-                _geometry_signature(student_entity, relative=False),
+                _candidate_cost(reference_entity, student_entity, ignore_position=ignore_pos),
+                _geometry_signature(reference_entity, relative=False, precision=prec),
+                _geometry_signature(student_entity, relative=False, precision=prec),
                 reference_entity,
                 student_entity,
             )
@@ -484,7 +688,7 @@ def _match_entities(reference: Drawing, student: Drawing, tolerance: TolerancePr
             for student_entity in student.entities
             if reference_entity.id not in used_r
             and student_entity.id not in used_s
-            and _compatible(reference_entity, student_entity)
+            and _compatible(reference_entity, student_entity, exact_kind=ignore_pos)
         ),
         key=lambda item: (item[0], repr(item[1]), repr(item[2]), item[3].id, item[4].id),
     )
@@ -497,14 +701,56 @@ def _match_entities(reference: Drawing, student: Drawing, tolerance: TolerancePr
             - (entity_length(student_entity) or 0)
         )
         distance = _distance(reference_entity, student_entity)
-        plausible = distance <= threshold or (
-            reference_entity.kind in {"line", "polyline"}
-            and distance <= max(threshold, length_delta + tolerance.position)
-        )
+        if ignore_pos:
+            plausible = True
+            if reference_entity.kind in {"line", "polyline"}:
+                angle_diff = (
+                    _angle_delta(_angle(reference_entity), _angle(student_entity))
+                    if _angle(reference_entity) is not None and _angle(student_entity) is not None
+                    else 0.0
+                )
+                plausible = (
+                    length_delta <= max(
+                        tolerance.length * 5,
+                        (entity_length(reference_entity) or 0) * 0.6,
+                    )
+                    and angle_diff <= 60.0
+                )
+            elif reference_entity.kind in {"circle", "arc"}:
+                rad_delta = abs((reference_entity.radius or 0) - (student_entity.radius or 0))
+                plausible = rad_delta <= max(
+                    tolerance.radius * 5,
+                    (reference_entity.radius or 0) * 0.6,
+                )
+                if plausible and reference_entity.kind == "arc":
+                    ref_span = ((reference_entity.end_angle or 0.0) - (reference_entity.start_angle or 0.0)) % 360.0
+                    if ref_span == 0.0:
+                        ref_span = 360.0
+                    stu_span = ((student_entity.end_angle or 0.0) - (student_entity.start_angle or 0.0)) % 360.0
+                    if stu_span == 0.0:
+                        stu_span = 360.0
+                    span_delta = abs(ref_span - stu_span)
+                    plausible = (span_delta <= 60.0 or span_delta >= 300.0)
+            elif reference_entity.kind == "dimension":
+                rm = reference_entity.measurement or 0.0
+                sm = student_entity.measurement or 0.0
+                plausible = abs(rm - sm) <= max(tolerance.dimension * 5, abs(rm) * 0.6)
+        else:
+            plausible = distance <= threshold or (
+                reference_entity.kind in {"line", "polyline"}
+                and distance <= max(threshold, length_delta + tolerance.position)
+            )
         if plausible:
             used_r.add(reference_entity.id)
             used_s.add(student_entity.id)
-            confidence = max(0.0, min(1.0, 1 - cost / (extent + 1)))
+            if ignore_pos:
+                quality = _intrinsic_match_quality(reference_entity, student_entity)
+                match_qual = round(max(0.0, min(1.0, quality)), 3)
+                match_qualities[reference_entity.id] = match_qual
+                confidence = round(max(0.60, min(1.0, 0.60 + 0.40 * match_qual)), 3)
+            else:
+                confidence = max(0.0, min(1.0, 1 - cost / (extent + 1)))
+                match_qualities[reference_entity.id] = confidence
             matched.append((reference_entity, student_entity, confidence))
     reference_order = {
         entity.id: index for index, entity in enumerate(reference.entities)
@@ -512,7 +758,7 @@ def _match_entities(reference: Drawing, student: Drawing, tolerance: TolerancePr
     matched.sort(key=lambda item: (reference_order[item[0].id], item[1].id))
     missing = [entity for entity in reference.entities if entity.id not in used_r]
     extra = [entity for entity in student.entities if entity.id not in used_s]
-    return matched, missing, extra
+    return matched, missing, extra, match_qualities
 
 
 def _prepare_comparison_geometry(
@@ -630,7 +876,14 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         reference_normalization,
         student_normalization,
     ) = _prepare_comparison_geometry(reference, student, rubric, tolerance)
-    matched, missing, extra = _match_entities(reference, matching_student, tolerance)
+    tolerant_placement = (
+        rubric.normalization_mode == "translation"
+        and getattr(rubric, "rubric_source", None) != "explicit_fallback"
+    )
+    matching_mode = "translation" if tolerant_placement else "strict"
+    matched, missing, extra, match_qualities = _match_entities(
+        reference, matching_student, tolerance, mode=matching_mode
+    )
     analysis = analyze_comparison(
         reference,
         matching_student,
@@ -729,6 +982,21 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         )
 
     for finding in analysis.findings:
+        if tolerant_placement and finding.category == "incorrect_position":
+            analysis.suppressed_findings.append({
+                "category": "incorrect_position",
+                "classification": "suppressed",
+                "reference_entity_id": (
+                    finding.reference_entity.id if finding.reference_entity else None
+                ),
+                "student_entity_id": (
+                    finding.student_entity.id if finding.student_entity else None
+                ),
+                "primary_category": "translation_tolerant_placement",
+                "suppression_reason": "translation_tolerant_mode",
+                "observation": finding.measurement,
+            })
+            continue
         add(finding)
     global_displacement = student_normalization.get("global_displacement") or {}
     if global_displacement.get("detected"):
@@ -861,6 +1129,9 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
                 "reference_entity_id": reference_entity.id,
                 "student_entity_id": student_entity.id,
                 "confidence": round(confidence, 3),
+                "match_quality": round(
+                    match_qualities.get(reference_entity.id, confidence), 3
+                ),
             }
             for reference_entity, student_entity, confidence in matched
         ],
@@ -875,6 +1146,7 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
         "rubric_application": {
             "approved": rubric.approved,
             "normalization_mode": rubric.normalization_mode,
+            "rubric_source": getattr(rubric, "rubric_source", None),
             "completion_scoring_mode": rubric.completion_scoring_mode,
             "category_weights": {
                 category.id: category.weight for category in rubric.categories

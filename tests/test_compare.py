@@ -147,17 +147,23 @@ def test_one_moved_entity_does_not_create_global_transform():
         _circle("S-4", (68, 20), 5, source="student", layer="circle"),
     )
 
-    result = compare_drawings(reference, student, rubric=_approved_rubric())
+    result = compare_drawings(reference, student, rubric=_approved_rubric("translation"))
 
     assert result["normalization"]["student"]["translation"] == [0.0, 0.0]
     assert (
         result["normalization"]["student"]["rejection_reason"]
         == "consensus_translation_within_position_tolerance"
     )
-    assert [issue["category"] for issue in result["issues"]] == [
+    assert result["issues"] == []
+    assert len(result["suppressed_findings"]) == 1
+    assert result["suppressed_findings"][0]["category"] == "incorrect_position"
+    assert result["match_count"] == 4
+
+    strict_result = compare_drawings(reference, student, rubric=_approved_rubric("strict"))
+    assert [issue["category"] for issue in strict_result["issues"]] == [
         "incorrect_position"
     ]
-    assert result["match_count"] == 4
+    assert strict_result["match_count"] == 4
 
 
 def test_one_resized_extreme_entity_does_not_create_global_transform():

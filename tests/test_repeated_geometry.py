@@ -88,15 +88,21 @@ def test_two_locally_moved_repeated_arcs_become_position_issues():
     reference = _repeated_arcs(((0, 0), (30, 0), (60, 0)), "reference")
     student = _repeated_arcs(((0, 0), (50, 0), (80, 0)), "student")
 
-    result = compare_drawings(reference, student, rubric=_rubric())
-    categories = [issue["category"] for issue in result["issues"]]
+    strict_result = compare_drawings(reference, student, rubric=_rubric("strict"))
+    categories = [issue["category"] for issue in strict_result["issues"]]
 
-    assert result["normalization"]["student"]["translation"] == [0.0, 0.0]
-    assert result["match_count"] == 3
+    assert strict_result["normalization"]["student"]["translation"] == [0.0, 0.0]
+    assert strict_result["match_count"] == 3
     assert categories == ["incorrect_position", "incorrect_position"]
     assert "missing_geometry" not in categories
     assert "extra_geometry" not in categories
-    assert result["score"] == 94
+    assert strict_result["score"] == 94
+
+    tol_result = compare_drawings(reference, student, rubric=_rubric("translation"))
+    assert tol_result["match_count"] == 3
+    assert tol_result["score"] == 100
+    assert tol_result["issues"] == []
+    assert len(tol_result["suppressed_findings"]) == 2
 
 
 def test_repeated_arc_matching_is_stable_when_student_order_is_reversed():
@@ -105,12 +111,13 @@ def test_repeated_arc_matching_is_stable_when_student_order_is_reversed():
     reordered = deepcopy(student)
     reordered.entities.reverse()
 
-    first = compare_drawings(reference, student, rubric=_rubric())
-    second = compare_drawings(reference, reordered, rubric=_rubric())
+    for mode in ("strict", "translation"):
+        first = compare_drawings(reference, student, rubric=_rubric(mode))
+        second = compare_drawings(reference, reordered, rubric=_rubric(mode))
 
-    assert second["score"] == first["score"] == 94
-    assert second["matches"] == first["matches"]
-    assert second["issues"] == first["issues"]
+        assert second["score"] == first["score"]
+        assert second["matches"] == first["matches"]
+        assert second["issues"] == first["issues"]
 
 
 def test_repeated_arc_count_shortage_leaves_only_actual_missing_remainder():
@@ -145,7 +152,7 @@ def test_manual_arc_fixtures_preserve_translation_and_localize_two_moves():
 
     exact_result = compare_drawings(reference, exact, rubric=_rubric())
     translated_result = compare_drawings(reference, all_moved, rubric=_rubric())
-    local_result = compare_drawings(reference, two_moved, rubric=_rubric())
+    local_result = compare_drawings(reference, two_moved, rubric=_rubric("strict"))
     local_categories = [issue["category"] for issue in local_result["issues"]]
 
     assert exact_result["score"] == 100
@@ -154,6 +161,11 @@ def test_manual_arc_fixtures_preserve_translation_and_localize_two_moves():
     assert local_result["score"] == 94
     assert local_result["match_count"] == 3
     assert local_categories == ["incorrect_position", "incorrect_position"]
+
+    local_tol = compare_drawings(reference, two_moved, rubric=_rubric("translation"))
+    assert local_tol["score"] == 100
+    assert local_tol["match_count"] == 3
+    assert local_tol["issues"] == []
 
 
 def test_manual_all_moved_arcs_remain_position_errors_in_strict_mode():

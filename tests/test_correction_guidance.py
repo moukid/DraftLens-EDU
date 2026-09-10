@@ -166,7 +166,7 @@ def test_manual_arc_fixtures_have_no_stale_commands_and_two_moves_are_specific()
 
     exact_result = compare_drawings(reference, exact, rubric=approved_rubric())
     translated_result = compare_drawings(reference, all_moved, rubric=approved_rubric())
-    local_result = compare_drawings(reference, two_moved, rubric=approved_rubric())
+    local_result = compare_drawings(reference, two_moved, rubric=approved_rubric("strict"))
 
     assert exact_result["score"] == translated_result["score"] == 100
     assert exact_result["issues"] == translated_result["issues"] == []
@@ -200,7 +200,7 @@ def test_manual_square_and_valid_junction_fixtures_leave_no_stale_commands():
 def test_displaced_square_has_one_move_and_command_free_linked_topology():
     reference = fixture_drawing("simple_audit-II", "02-SQUARE-Reference.dxf", "reference")
     student = fixture_drawing("simple_audit-II", "02-SQUARE-Gap-3Unit.dxf", "student")
-    result = compare_drawings(reference, student, rubric=approved_rubric())
+    result = compare_drawings(reference, student, rubric=approved_rubric("strict"))
     primary = [item for item in result["issues"] if item["classification"] == "primary"]
     supporting = [item for item in result["issues"] if item["classification"] == "supporting_evidence"]
 

@@ -308,9 +308,41 @@ def assess_compatibility(
         and spatial["support"] >= 2
         and spatial["ratio"] >= MIN_TRANSLATION_COHERENCE_RATIO
     )
+    rubric_app = comparison.get("rubric_application", {})
+    mode = (
+        rubric_app.get("normalization_mode")
+        or normalization.get("mode")
+        or "strict"
+    )
+    rubric_source = rubric_app.get("rubric_source")
+    matches = comparison.get("matches", [])
+    high_q_threshold = 0.85
+    high_q_matches = [
+        m for m in matches
+        if float(m.get("match_quality", m.get("confidence", 0.0))) >= high_q_threshold
+    ]
+    high_q_count = len(high_q_matches)
+    high_q_ref_cov = high_q_count / max(reference_count, 1)
+    high_q_stu_cov = high_q_count / max(student_count, 1)
+    mean_quality = (
+        (sum(float(m.get("match_quality", m.get("confidence", 0.0))) for m in matches) / len(matches))
+        if matches
+        else 0.0
+    )
     unmatched_geometry_ratio = (
         max(0, reference_count - confident) + max(0, student_count - confident)
     ) / max(reference_count + student_count, 1)
+
+    independent_placement_correspondence = bool(
+        mode == "translation"
+        and rubric_source != "explicit_fallback"
+        and high_q_count >= min(MIN_TRANSLATION_COHERENCE_SUPPORT, reference_count)
+        and high_q_ref_cov >= 0.70
+        and high_q_stu_cov >= 0.70
+        and mean_quality >= 0.75
+        and unmatched_geometry_ratio <= 0.30
+        and overlap >= 0.75
+    )
     reasons: list[str] = []
 
     if student_count == 0:
@@ -331,11 +363,14 @@ def assess_compatibility(
         spatial["strong"]
         or accepted_transform
         or substantial_object_correspondence
+        or independent_placement_correspondence
     ):
         status = "compatible"
         confidence = "verified" if reference_coverage >= 0.5 else "high"
         reasons.extend(spatial["reason_codes"])
-        if substantial_object_correspondence and not spatial["strong"]:
+        if independent_placement_correspondence:
+            reasons.append("independent_placement_correspondence")
+        elif substantial_object_correspondence and not spatial["strong"]:
             reasons.append("substantial_object_correspondence")
         if accepted_transform:
             reasons.append("accepted_whole_drawing_translation")
