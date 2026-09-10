@@ -232,6 +232,103 @@ dd { margin: 2px 0 0; font-weight: 800; overflow-wrap: anywhere; }
   font-size: 12px;
 }
 
+.validation-findings {
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+.validation-findings-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.validation-finding-item {
+  padding: 10px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  font-size: 12px;
+  display: grid;
+  gap: 6px;
+}
+.validation-finding-item.is-critical {
+  border-color: #e5aaa6;
+  background: var(--red-soft);
+}
+.validation-finding-item.is-warning {
+  border-color: #e9c976;
+  background: var(--yellow-soft);
+}
+.validation-finding-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.validation-finding-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.validation-finding-badge.danger {
+  border-color: #e5aaa6;
+  background: white;
+  color: #982e28;
+}
+.validation-finding-badge.warning {
+  border-color: #e9c976;
+  background: white;
+  color: #775100;
+}
+.validation-finding-title {
+  color: var(--ink);
+  font-size: 12px;
+}
+.validation-finding-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.validation-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: white;
+  border: 1px solid var(--line);
+  color: var(--charcoal);
+}
+.validation-tag.entity-type {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+}
+.validation-finding-explanation {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.validation-finding-correction {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--charcoal);
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 5px;
+  border-left: 3px solid var(--muted);
+}
+.validation-finding-item.is-critical .validation-finding-correction {
+  border-left-color: var(--red);
+}
+.validation-finding-item.is-warning .validation-finding-correction {
+  border-left-color: var(--yellow);
+}
+
 .field { display: grid; gap: 5px; font-size: 12px; font-weight: 700; }
 .field input, .field select, .rubric-row input, .tolerance-grid input {
   width: 100%;

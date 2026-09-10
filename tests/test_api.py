@@ -389,3 +389,92 @@ def test_review_responses_contain_no_machine_paths_or_internal_details():
   assert ":\\" not in value
   assert "Traceback" not in value
   assert "__file__" not in value
+
+
+def test_reference_validate_api_returns_detailed_findings():
+    # 1. Zero-length LINE
+    doc_line = ezdxf.new("R2010")
+    doc_line.units = ezdxf.units.MM
+    doc_line.modelspace().add_line((10, 10), (10, 10), dxfattribs={"layer": "DEFPOINTS"})
+    buf_line = io.StringIO()
+    doc_line.write(buf_line)
+    line_bytes = buf_line.getvalue().encode("utf-8")
+
+    resp_line = client.post("/api/reference/validate", files={"reference": ("zero_line.dxf", line_bytes, "application/dxf")})
+    assert resp_line.status_code == 200
+    val_line = resp_line.json()["validation"]
+    assert val_line["can_continue"] is False
+    assert val_line["valid"] is False
+    assert val_line["summary"]["critical"] >= 1
+    critical_findings = [f for f in val_line["findings"] if f["code"] == "zero_length"]
+    assert len(critical_findings) == 1
+    cf = critical_findings[0]
+    assert cf["severity"] == "critical"
+    assert cf["blocks_reference"] is True
+    assert cf["entity_type"] == "LINE"
+    assert cf["layer"] == "DEFPOINTS"
+    assert cf["source_handle"] is not None
+    assert "zero length" in cf["explanation"]
+    assert "AutoCAD" in cf["suggested_correction"]
+
+    # 2. Zero-radius CIRCLE
+    doc_circ = ezdxf.new("R2010")
+    doc_circ.units = ezdxf.units.MM
+    doc_circ.modelspace().add_circle((5, 5), radius=0, dxfattribs={"layer": "CENTER"})
+    buf_circ = io.StringIO()
+    doc_circ.write(buf_circ)
+    circ_bytes = buf_circ.getvalue().encode("utf-8")
+
+    resp_circ = client.post("/api/reference/validate", files={"reference": ("zero_circ.dxf", circ_bytes, "application/dxf")})
+    assert resp_circ.status_code == 200
+    val_circ = resp_circ.json()["validation"]
+    assert val_circ["can_continue"] is False
+    zero_rad = [f for f in val_circ["findings"] if f["code"] == "zero_radius"][0]
+    assert zero_rad["entity_type"] == "CIRCLE"
+    assert zero_rad["blocks_reference"] is True
+    assert zero_rad["layer"] == "CENTER"
+    assert "radius" in zero_rad["explanation"]
+
+    # 3. Warning case (duplicate geometry + unsupported)
+    doc_warn = ezdxf.new("R2010")
+    doc_warn.units = ezdxf.units.MM
+    msp_warn = doc_warn.modelspace()
+    msp_warn.add_line((0, 0), (20, 0), dxfattribs={"layer": "WALLS"})
+    msp_warn.add_line((0, 0), (20, 0), dxfattribs={"layer": "WALLS"})
+    msp_warn.add_hatch(dxfattribs={"layer": "SHADING"})
+    buf_warn = io.StringIO()
+    doc_warn.write(buf_warn)
+    warn_bytes = buf_warn.getvalue().encode("utf-8")
+
+    resp_warn = client.post("/api/reference/validate", files={"reference": ("warn.dxf", warn_bytes, "application/dxf")})
+    assert resp_warn.status_code == 200
+    val_warn = resp_warn.json()["validation"]
+    assert val_warn["can_continue"] is True
+    assert val_warn["requires_acknowledgement"] is True
+    dup = [f for f in val_warn["findings"] if f["code"] == "duplicate_geometry"][0]
+    assert dup["blocks_reference"] is False
+    assert dup["entity_type"] == "LINE"
+    assert dup["layer"] == "WALLS"
+
+    unsup = [f for f in val_warn["findings"] if f["code"] == "unsupported_entity"][0]
+    assert unsup["blocks_reference"] is False
+    assert unsup["entity_type"] == "HATCH"
+    assert unsup["layer"] == "SHADING"
+    assert unsup["source_handle"] is not None
+
+    # 4. Entity without optional metadata (drawing without units)
+    doc_no_units = ezdxf.new("R2010")
+    doc_no_units.header["$INSUNITS"] = 0
+    doc_no_units.modelspace().add_line((0, 0), (10, 0))
+    buf_nu = io.StringIO()
+    doc_no_units.write(buf_nu)
+    nu_bytes = buf_nu.getvalue().encode("utf-8")
+
+    resp_nu = client.post("/api/reference/validate", files={"reference": ("no_units.dxf", nu_bytes, "application/dxf")})
+    assert resp_nu.status_code == 200
+    val_nu = resp_nu.json()["validation"]
+    nu_finding = [f for f in val_nu["findings"] if f["code"] == "missing_units"][0]
+    assert nu_finding["entity_type"] is None
+    assert nu_finding["source_handle"] is None
+    assert nu_finding["layer"] is None
+    assert nu_finding["blocks_reference"] is False
