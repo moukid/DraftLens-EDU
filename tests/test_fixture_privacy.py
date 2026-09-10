@@ -20,6 +20,9 @@ import pathlib
 import re
 import subprocess
 from typing import List, Tuple
+from unittest import mock
+
+import pytest
 
 # Base patterns for generic identifying metadata (specific patterns first)
 PATH_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -308,33 +311,190 @@ def test_coverage_former_excluded_and_nested_directories_not_bypassed():
 
 
 # =============================================================================
-# Historical Red-Test (In-Memory Git Blob Verification)
+# Historical and Synthetic Verification (Fail-Closed Architecture)
 # =============================================================================
 
-def test_historical_unsanitized_fixtures_are_rejected():
-    """Verify that historical unsanitized fixtures from base commit 5b8df0f are rejected by scanner."""
-    historical_targets = [
+def verify_historical_fixture_bytes(
+    inputs: list[tuple[str, bytes]],
+    expected_count: int,
+) -> tuple[int, int]:
+    """Verify that expected historical inputs are present, rejected by scanner, and safely redacted."""
+    if expected_count <= 0:
+        raise ValueError("Expected count must be greater than zero")
+    if len(inputs) != expected_count:
+        raise AssertionError(
+            f"Historical input collection mismatch: expected {expected_count}, got {len(inputs)}"
+        )
+
+    checked_count = 0
+    for rel_path, raw_bytes in inputs:
+        if not raw_bytes:
+            raise AssertionError(f"Empty input bytes for historical fixture: {rel_path}")
+        content = raw_bytes.decode("latin1", errors="replace")
+        findings = scan_text_for_privacy_violations(content, rel_filename=rel_path)
+        if not findings:
+            raise AssertionError(
+                f"Historical fixture failed to trigger expected privacy findings: {rel_path}"
+            )
+        for f in findings:
+            if "[REDACTED]" not in f:
+                raise AssertionError(f"Finding missing redaction marker for: {rel_path}")
+        checked_count += 1
+
+    if checked_count != expected_count or checked_count == 0:
+        raise AssertionError(
+            f"Failed to verify all required inputs: checked {checked_count} of {expected_count}"
+        )
+    return len(inputs), checked_count
+
+
+def load_historical_fixtures_from_git(
+    commit_sha: str,
+    target_rel_paths: list[str],
+) -> list[tuple[str, bytes]]:
+    """Load historical DXF fixture bytes from git commit without checking out files."""
+    if not target_rel_paths:
+        raise ValueError("Target path list must not be empty")
+
+    loaded: list[tuple[str, bytes]] = []
+    for rel_path in target_rel_paths:
+        try:
+            raw_bytes = subprocess.check_output(
+                ["git", "show", f"{commit_sha}:{rel_path}"],
+                stderr=subprocess.DEVNULL,
+            )
+            if not raw_bytes:
+                raise AssertionError(f"Historical blob is empty: {rel_path}")
+            loaded.append((rel_path, raw_bytes))
+        except subprocess.CalledProcessError:
+            raise AssertionError(f"Failed to load required historical fixture from git: {rel_path}") from None
+        except FileNotFoundError:
+            raise AssertionError(f"Git executable unavailable to read historical fixture: {rel_path}") from None
+        except Exception:
+            raise AssertionError(f"Historical fixture load error: {rel_path}") from None
+
+    if len(loaded) != len(target_rel_paths):
+        raise AssertionError(
+            f"Incomplete historical load: expected {len(target_rel_paths)}, loaded {len(loaded)}"
+        )
+    return loaded
+
+
+def test_local_historical_unsanitized_fixtures_are_rejected():
+    """Verify local historical unsanitized fixtures from base commit 5b8df0f fail closed if unreadable or clean."""
+    targets = [
         "tests/fixtures/simple_audit/00_reference_000-Simple.dxf",
         "tests/fixtures/simple_audit-II/01-ARC-Reference.dxf",
         "samples/basic_geometry/reference.dxf",
     ]
+    loaded = load_historical_fixtures_from_git("5b8df0f", targets)
+    loaded_count, checked_count = verify_historical_fixture_bytes(loaded, expected_count=len(targets))
+    assert loaded_count == len(targets)
+    assert checked_count == len(targets)
 
-    for target_path in historical_targets:
+
+def test_permanent_ci_synthetic_objects_metadata_rejected():
+    """Verify synthetic DXF fixtures containing group 303 and group 2 identifying metadata are rejected.
+
+    This permanent CI regression test has zero Git history dependencies and runs in any CI/CD environment.
+    """
+    synthetic_fixtures = [
+        (
+            "samples/synthetic_xrecord_303.dxf",
+            b"  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n  0\r\nACDBXRECORD\r\n"
+            b"  303\r\nC:\\Synthetic_Workstation\\CAD\\part_01.dxf\r\n  0\r\nENDSEC\r\n",
+        ),
+        (
+            "tests/fixtures/synthetic_plotsettings_user_profile.dxf",
+            b"  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n  0\r\nACDBPLOTSETTINGS\r\n"
+            b"  2\r\nC:\\Users\\synth_drafter\\AppData\\plotters\\test.pc3\r\n  0\r\nENDSEC\r\n",
+        ),
+        (
+            "tests/fixtures/synthetic_plotsettings_legacy_profile.dxf",
+            b"  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n  0\r\nLAYOUT\r\n"
+            b"  2\r\nC:\\Documents and Settings\\synth_admin\\Application Data\\test.pc3\r\n  0\r\nENDSEC\r\n",
+        ),
+        (
+            "samples/synthetic_unc_share.dxf",
+            b"  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n  0\r\nACDBXRECORD\r\n"
+            b"  303\r\n\\\\synth-nas\\engineering_drawings\\chassis.dxf\r\n  0\r\nENDSEC\r\n",
+        ),
+    ]
+    loaded_count, checked_count = verify_historical_fixture_bytes(
+        synthetic_fixtures, expected_count=len(synthetic_fixtures)
+    )
+    assert loaded_count == len(synthetic_fixtures)
+    assert checked_count == len(synthetic_fixtures)
+
+
+# =============================================================================
+# Fault-Injection Test Suite
+# =============================================================================
+
+def test_fault_injection_all_reads_fail():
+    """Fault injection: when all git reads fail, load must fail closed with an AssertionError."""
+    targets = ["samples/file1.dxf", "tests/file2.dxf"]
+    with mock.patch("subprocess.check_output", side_effect=subprocess.CalledProcessError(1, "git")):
+        with pytest.raises(AssertionError) as exc_info:
+            load_historical_fixtures_from_git("5b8df0f", targets)
+        assert "Failed to load required historical fixture from git: samples/file1.dxf" in str(exc_info.value)
+
+
+def test_fault_injection_one_read_fails():
+    """Fault injection: when one git read fails among multiple, load must fail closed."""
+    targets = ["samples/file1.dxf", "samples/file2.dxf", "samples/file3.dxf"]
+    def mock_check_output(cmd, **kwargs):
+        if "file2.dxf" in cmd[2]:
+            raise subprocess.CalledProcessError(1, "git")
+        return b"dummy content"
+
+    with mock.patch("subprocess.check_output", side_effect=mock_check_output):
+        with pytest.raises(AssertionError) as exc_info:
+            load_historical_fixtures_from_git("5b8df0f", targets)
+        assert "Failed to load required historical fixture from git: samples/file2.dxf" in str(exc_info.value)
+
+
+def test_fault_injection_empty_input_collection():
+    """Fault injection: empty inputs or zero expected count must fail immediately."""
+    with pytest.raises(AssertionError) as exc_info:
+        verify_historical_fixture_bytes([], expected_count=3)
+    assert "Historical input collection mismatch" in str(exc_info.value)
+
+    with pytest.raises(ValueError):
+        verify_historical_fixture_bytes([], expected_count=0)
+
+
+def test_fault_injection_sensitive_content_not_detected():
+    """Fault injection: if clean content is provided, verify_historical_fixture_bytes must fail."""
+    clean_bytes = b"  0\r\nSECTION\r\n  2\r\nENTITIES\r\n  0\r\nENDSEC\r\n"
+    with pytest.raises(AssertionError) as exc_info:
+        verify_historical_fixture_bytes([("samples/clean.dxf", clean_bytes)], expected_count=1)
+    assert "failed to trigger expected privacy findings: samples/clean.dxf" in str(exc_info.value)
+
+
+def test_fault_injection_valid_inputs_succeed():
+    """Fault injection control: verified sensitive inputs must succeed with accurate counts."""
+    synth_input = [(
+        "samples/valid_synth.dxf",
+        b"  303\r\nC:\\Test_Build\\file.dxf\r\n"
+    )]
+    loaded, checked = verify_historical_fixture_bytes(synth_input, expected_count=1)
+    assert loaded == 1
+    assert checked == 1
+
+
+def test_fault_injection_failure_messages_are_redacted():
+    """Fault injection: verify failure diagnostics never contain absolute drive paths."""
+    targets = ["samples/file1.dxf"]
+    with mock.patch("subprocess.check_output", side_effect=subprocess.CalledProcessError(1, "git")):
         try:
-            raw_bytes = subprocess.check_output(
-                ["git", "show", f"5b8df0f:{target_path}"],
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            continue
-
-        content = raw_bytes.decode("latin1", errors="replace")
-        findings = scan_text_for_privacy_violations(content, rel_filename=target_path)
-        # Historical unsanitized version MUST trigger findings
-        assert len(findings) > 0, f"Expected historical {target_path} to be rejected"
-        # Findings must be safely redacted
-        for f in findings:
-            assert "[REDACTED]" in f
+            load_historical_fixtures_from_git("5b8df0f", targets)
+        except AssertionError as exc:
+            msg = str(exc)
+            assert ":\\" not in msg
+            assert "git" in msg or "samples/file1.dxf" in msg
+            assert "C:" not in msg
+            assert "D:" not in msg
 
 
 # =============================================================================
