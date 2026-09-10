@@ -380,17 +380,38 @@ def load_historical_fixtures_from_git(
     return loaded
 
 
-def test_local_historical_unsanitized_fixtures_are_rejected():
-    """Verify local historical unsanitized fixtures from base commit 5b8df0f fail closed if unreadable or clean."""
-    targets = [
-        "tests/fixtures/simple_audit/00_reference_000-Simple.dxf",
-        "tests/fixtures/simple_audit-II/01-ARC-Reference.dxf",
-        "samples/basic_geometry/reference.dxf",
-    ]
-    loaded = load_historical_fixtures_from_git("5b8df0f", targets)
-    loaded_count, checked_count = verify_historical_fixture_bytes(loaded, expected_count=len(targets))
-    assert loaded_count == len(targets)
-    assert checked_count == len(targets)
+HISTORICAL_TARGET_PATHS: list[str] = [
+    "tests/fixtures/simple_audit/00_reference_000-Simple.dxf",
+    "tests/fixtures/simple_audit-II/01-ARC-Reference.dxf",
+    "samples/basic_geometry/reference.dxf",
+]
+
+
+def test_privacy_suite_independent_of_real_git_history():
+    """Verify permanent CI privacy tests have zero dependency on unmocked Git history.
+
+    Simulates real Git reads being unavailable in CI/CD (e.g. shallow clones or exports)
+    and verifies that permanent CI test functions pass without invoking Git.
+    """
+    # 1. Verify verify_local_fixture_history.py is outside tests/ and has no pytest test functions
+    script_path = get_repo_root() / "scripts" / "verify_local_fixture_history.py"
+    assert script_path.is_file(), "scripts/verify_local_fixture_history.py must exist"
+    script_code = script_path.read_text(encoding="utf-8")
+    assert "def test_" not in script_code, "Audit script must not contain test_ functions"
+
+    # 2. Simulate real git reads being completely blocked / unavailable
+    with mock.patch("subprocess.check_output", side_effect=RuntimeError("Real git calls forbidden in CI")):
+        # Synthetic objects metadata test must pass completely
+        test_permanent_ci_synthetic_objects_metadata_rejected()
+
+        # Scanner execution on arbitrary text must pass without git
+        findings = scan_text_for_privacy_violations("  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n")
+        assert findings == []
+
+        # Importing helper or module must not execute any git commands
+        from tests import test_fixture_privacy
+        assert hasattr(test_fixture_privacy, "HISTORICAL_TARGET_PATHS")
+        assert len(test_fixture_privacy.HISTORICAL_TARGET_PATHS) == 3
 
 
 def test_permanent_ci_synthetic_objects_metadata_rejected():
