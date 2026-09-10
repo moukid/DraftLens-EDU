@@ -1,9 +1,10 @@
+from tests.synthetic_data import fixture_root, samples_root
 from pathlib import Path
 from app.compare import compare_drawings
 from app.dxf import parse_dxf_path
 from app.models import Drawing, Entity
 from app.rubric import default_rubric
-S=Path(__file__).parents[1]/"samples"
+S=samples_root()
 def test_good_scores_full(): assert compare_drawings(parse_dxf_path(S/"reference.dxf"),parse_dxf_path(S/"student_good.dxf"))["score"]==100
 def test_missing_wall_detected(): assert "MISSING_WALL" in {i["code"] for i in compare_drawings(parse_dxf_path(S/"reference.dxf"),parse_dxf_path(S/"student_missing_wall.dxf"))["issues"]}
 def test_door_window_detected():
@@ -147,17 +148,23 @@ def test_one_moved_entity_does_not_create_global_transform():
         _circle("S-4", (68, 20), 5, source="student", layer="circle"),
     )
 
-    result = compare_drawings(reference, student, rubric=_approved_rubric())
+    result = compare_drawings(reference, student, rubric=_approved_rubric("translation"))
 
     assert result["normalization"]["student"]["translation"] == [0.0, 0.0]
     assert (
         result["normalization"]["student"]["rejection_reason"]
         == "consensus_translation_within_position_tolerance"
     )
-    assert [issue["category"] for issue in result["issues"]] == [
+    assert result["issues"] == []
+    assert len(result["suppressed_findings"]) == 1
+    assert result["suppressed_findings"][0]["category"] == "incorrect_position"
+    assert result["match_count"] == 4
+
+    strict_result = compare_drawings(reference, student, rubric=_approved_rubric("strict"))
+    assert [issue["category"] for issue in strict_result["issues"]] == [
         "incorrect_position"
     ]
-    assert result["match_count"] == 4
+    assert strict_result["match_count"] == 4
 
 
 def test_one_resized_extreme_entity_does_not_create_global_transform():

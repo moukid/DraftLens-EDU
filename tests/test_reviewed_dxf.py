@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 from copy import deepcopy
 from pathlib import Path
 import math
@@ -10,7 +11,7 @@ from app.reviewed_dxf import build_reviewed_drawing
 from app.svg_renderer import CoordinateTransform, render_svg
 from app.validator import validate_reference
 
-SAMPLES = Path(__file__).parents[1] / "samples"
+SAMPLES = samples_root()
 
 
 def entity(entity_id, kind, points, *, source="reference", layer="0", radius=None, closed=False, text=None, properties=None):

@@ -45,8 +45,8 @@ def drawing(*entities):
     )
 
 
-def rubric():
-    return default_rubric().model_copy(update={"approved": True})
+def rubric(mode: str = "strict"):
+    return default_rubric().model_copy(update={"approved": True, "normalization_mode": mode})
 
 
 def test_moved_and_resized_circle_keeps_two_independent_primary_errors():

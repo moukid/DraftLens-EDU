@@ -287,6 +287,15 @@ function resetCorrectionGuidance() {
   ].forEach((id) => { byId(id).hidden = true; });
   byId("feedback-commands").hidden = true;
 }
+function resetValidationFindings() {
+  const container = byId("validation-findings");
+  const list = byId("validation-findings-list");
+  const count = byId("validation-findings-count");
+  if (container) container.hidden = true;
+  if (list) clearChildren(list);
+  if (count) count.textContent = "0";
+}
+
 function resetReferenceDependentState() {
   state.referenceId = null;
   state.referenceCanContinue = false;
@@ -304,6 +313,7 @@ function resetReferenceDependentState() {
   byId("completion-policy-summary").textContent = "";
   byId("normalization-policy-summary").textContent = "";
   byId("analysis-summary").hidden = true;
+  resetValidationFindings();
   byId("rubric-editor").hidden = true;
   byId("rubric-empty").hidden = false;
   byId("rubric-status").textContent = "";
@@ -319,6 +329,7 @@ async function inspectReference(file) {
     byId("validation-status").className = "validation-state neutral";
     byId("validation-status").textContent = "Not analyzed";
     byId("validation-message").textContent = "Upload a reference to inspect entities, extents, and validation findings.";
+    resetValidationFindings();
     setWorkflowStatus("Waiting for reference");
     updateReviewAvailability();
     return;
@@ -355,6 +366,7 @@ async function inspectReference(file) {
     byId("validation-status").className = "validation-state danger";
     byId("validation-status").textContent = "Reference rejected";
     byId("validation-message").textContent = "The reference could not be analyzed.";
+    resetValidationFindings();
     showError(error);
   } finally {
     setLoading(false);
@@ -372,6 +384,92 @@ function renderValidation(validation) {
     : warnings
       ? warnings + " warning(s) require instructor review before rubric approval."
       : "The reference passed deterministic validation.";
+
+  const container = byId("validation-findings");
+  const list = byId("validation-findings-list");
+  const countEl = byId("validation-findings-count");
+  if (!container || !list) return;
+
+  const findings = Array.isArray(validation.findings) ? validation.findings : [];
+  if (findings.length === 0) {
+    container.hidden = true;
+    clearChildren(list);
+    if (countEl) countEl.textContent = "0";
+    return;
+  }
+
+  container.hidden = false;
+  if (countEl) countEl.textContent = String(findings.length);
+  clearChildren(list);
+
+  findings.forEach((finding) => {
+    const item = document.createElement("li");
+    const isCritical = finding.severity === "critical";
+    item.className = "validation-finding-item " + (isCritical ? "is-critical" : "is-warning");
+
+    const header = document.createElement("div");
+    header.className = "validation-finding-header";
+
+    const badge = document.createElement("span");
+    badge.className = "validation-finding-badge " + (isCritical ? "danger" : "warning");
+    badge.textContent = isCritical ? "Critical — Blocks reference" : "Warning — Advisory";
+    header.append(badge);
+
+    const title = document.createElement("strong");
+    title.className = "validation-finding-title";
+    title.textContent = finding.message || (isCritical ? "Critical reference issue" : "Reference warning");
+    header.append(title);
+    item.append(header);
+
+    const metaRow = document.createElement("div");
+    metaRow.className = "validation-finding-meta";
+    let hasMeta = false;
+
+    if (finding.entity_type) {
+      const typeTag = document.createElement("span");
+      typeTag.className = "validation-tag entity-type";
+      typeTag.textContent = String(finding.entity_type);
+      metaRow.append(typeTag);
+      hasMeta = true;
+    }
+    if (finding.source_handle) {
+      const handleTag = document.createElement("span");
+      handleTag.className = "validation-tag entity-handle";
+      handleTag.textContent = "Handle: " + String(finding.source_handle);
+      metaRow.append(handleTag);
+      hasMeta = true;
+    }
+    if (finding.layer) {
+      const layerTag = document.createElement("span");
+      layerTag.className = "validation-tag entity-layer";
+      layerTag.textContent = "Layer: " + String(finding.layer);
+      metaRow.append(layerTag);
+      hasMeta = true;
+    }
+    if (hasMeta) {
+      item.append(metaRow);
+    }
+
+    if (finding.explanation) {
+      const explP = document.createElement("p");
+      explP.className = "validation-finding-explanation";
+      explP.textContent = finding.explanation;
+      item.append(explP);
+    }
+
+    if (finding.suggested_correction) {
+      const corrDiv = document.createElement("div");
+      corrDiv.className = "validation-finding-correction";
+      const corrLabel = document.createElement("strong");
+      corrLabel.textContent = "Suggested action: ";
+      const corrText = document.createElement("span");
+      corrText.textContent = finding.suggested_correction;
+      corrDiv.append(corrLabel, corrText);
+      item.append(corrDiv);
+    }
+
+    list.append(item);
+  });
 }
 
 function renderAnalysis(analysis, validation) {

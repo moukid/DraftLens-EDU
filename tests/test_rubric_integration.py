@@ -1,9 +1,10 @@
+from tests.synthetic_data import fixture_root, samples_root
 from pathlib import Path
 from fastapi.testclient import TestClient
 from app.main import RUBRIC_REFERENCES, RUBRICS, app
 from app.rubric import default_rubric
 
-SAMPLES = Path(__file__).parents[1] / "samples"
+SAMPLES = samples_root()
 client = TestClient(app)
 
 def suggest():

@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 from collections import Counter
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from app.review_service import build_review_response, run_grading_pipeline
 from app.rubric import default_rubric
 
 
-FIXTURES = Path(__file__).parent / "fixtures" / "simple_audit"
+FIXTURES = fixture_root() / "simple_audit"
 REFERENCE = "00_reference_000-Simple.dxf"
 EXACT = "01_exact_copy_should_score_100.dxf"
 MISSING = "02_missing_line_73B.dxf"
@@ -493,7 +494,7 @@ def test_disconnected_corner_review_localizes_selectable_topology_issue(audit_ou
     assert gap["issue_id"].startswith("T-GAP-")
     assert gap["visual_role"] == "connectivity"
     assert gap["region"] == pytest.approx(
-        (-113.425032, -59.721609, -113.425032, -54.721609)
+        (0, 0, 0, 5)
     )
     assert f'data-issue-id="{gap["issue_id"]}"' in review["svg"]
     assert 'data-role="connectivity"' in review["svg"]

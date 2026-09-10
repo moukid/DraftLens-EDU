@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.synthetic_data import fixture_root, samples_root
+
 import io
 from pathlib import Path
 
@@ -12,8 +14,8 @@ from app.main import REVIEW_SNAPSHOTS, app
 
 
 client = TestClient(app)
-AUDIT_II = Path(__file__).parent / "fixtures" / "simple_audit-II"
-AUDIT = Path(__file__).parent / "fixtures" / "simple_audit"
+AUDIT_II = fixture_root() / "simple_audit-II"
+AUDIT = fixture_root() / "simple_audit"
 
 
 def _plan_bytes(scale: float = 1.0, count: int = 4) -> bytes:

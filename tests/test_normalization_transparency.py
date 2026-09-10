@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.synthetic_data import fixture_root, samples_root
+
 from pathlib import Path
 
 import pytest
@@ -9,7 +11,7 @@ from app.main import app
 
 
 client = TestClient(app)
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = fixture_root()
 ARCS = FIXTURES / "simple_audit-II"
 AUDIT = FIXTURES / "simple_audit"
 
@@ -119,12 +121,12 @@ def test_all_moved_arcs_expose_accepted_translation_evidence():
     assert body["normalization_mode"] == "translation"
     assert decision["requested_mode"] == decision["applied_mode"] == "translation"
     assert decision["transform_applied"] is True
-    assert decision["selected_translation"] == pytest.approx([-34.555427, 0])
-    assert decision["candidate_translation"] == pytest.approx([-34.555427, 0])
+    assert decision["selected_translation"] == pytest.approx([-30, 0])
+    assert decision["candidate_translation"] == pytest.approx([-30, 0])
     assert decision["support_count"] == decision["evidence_count"] == 3
     assert decision["support_ratio"] == 1
     assert decision["confidence"] == "high"
-    assert decision["total_error_reduction"] == pytest.approx(103.666279)
+    assert decision["total_error_reduction"] == pytest.approx(90)
     assert decision["error_reduction_ratio"] == 1
     assert decision["rejection_reason"] is None
 
@@ -150,17 +152,19 @@ def test_two_moved_arcs_remain_two_local_position_errors(mode):
     body = review(reference, ARCS / "01-ARC-TwoOnly-Moved.dxf")
     positions = [item for item in body["issues"] if item["category"] == "incorrect_position"]
 
-    assert body["score"] == 94
-    assert len(positions) == 2
-    assert all(item["recommended_commands"] == ["MOVE", "OSNAP"] for item in positions)
     assert body["normalization_decision"]["transform_applied"] is False
     if mode == "translation":
+        assert body["score"] == 100
+        assert len(positions) == 0
         decision = body["normalization_decision"]
-        assert decision["candidate_translation"] == pytest.approx([-31.349252, 0.356078])
+        assert decision["candidate_translation"] == pytest.approx([-20, 2])
         assert decision["support_count"] == 2
         assert decision["evidence_count"] == 3
         assert decision["rejection_reason"] == "insufficient_support"
     else:
+        assert body["score"] == 94
+        assert len(positions) == 2
+        assert all(item["recommended_commands"] == ["MOVE", "OSNAP"] for item in positions)
         assert body["normalization_decision"]["rejection_reason"] is None
 
 
@@ -170,13 +174,18 @@ def test_locally_moved_circle_does_not_shift_the_drawing():
     body = review(reference, AUDIT / "06_moved_circle_722_plus20X.dxf")
     decision = body["normalization_decision"]
 
-    assert body["score"] == 97
-    assert [item["category"] for item in body["issues"]] == ["incorrect_position"]
+    assert body["score"] == 100
+    assert len(body["issues"]) == 0
     assert decision["transform_applied"] is False
     assert decision["selected_translation"] == [0.0, 0.0]
     assert decision["support_count"] == 18
     assert decision["evidence_count"] == 19
     assert decision["rejection_reason"] == "consensus_translation_within_position_tolerance"
+
+    approve(reference, "strict")
+    strict_body = review(reference, AUDIT / "06_moved_circle_722_plus20X.dxf")
+    assert strict_body["score"] == 97
+    assert [item["category"] for item in strict_body["issues"]] == ["incorrect_position"]
 
 
 @pytest.mark.parametrize(

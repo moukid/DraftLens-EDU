@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 import pytest
 from pydantic import ValidationError
 from app.rubric import Rubric, RubricCategory, default_rubric, suggest_assignment_title
@@ -44,7 +45,7 @@ def test_unapproved_rubric_cannot_grade_directly():
     from pathlib import Path
     from app.compare import compare_drawings
     from app.dxf import parse_dxf_path
-    samples = Path(__file__).parents[1] / "samples"
+    samples = samples_root()
     with pytest.raises(ValueError, match="approved rubric"):
         compare_drawings(parse_dxf_path(samples/"reference.dxf"), parse_dxf_path(samples/"student_good.dxf", source="student"), rubric=default_rubric())
 
@@ -53,7 +54,7 @@ def test_deductions_respect_rule_and_category_caps():
     from pathlib import Path
     from app.compare import compare_drawings
     from app.dxf import parse_dxf_path
-    samples = Path(__file__).parents[1] / "samples"
+    samples = samples_root()
     rubric = default_rubric().model_copy(update={"approved": True})
     missing_rule = next(rule for category in rubric.categories for rule in category.rules if rule.check == "missing_geometry")
     missing_rule.deduction = 100
@@ -69,7 +70,7 @@ def test_proportional_completion_suppresses_fixed_missing_rule():
     from app.compare import compare_drawings
     from app.dxf import parse_dxf_path
 
-    samples = Path(__file__).parents[1] / "samples"
+    samples = samples_root()
     rubric = default_rubric().model_copy(
         update={"approved": True, "completion_scoring_mode": "proportional"}
     )

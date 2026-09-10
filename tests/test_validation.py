@@ -92,13 +92,17 @@ def test_near_closed_polyline_emits_exactly_one_targeted_warning():
         [(0, 0), (100, 0), (100, 100), (0, 100), (0, 0.5)],
     )
     warnings = _open_polyline_findings(validate_reference(_drawing(near_closed)))
-    assert warnings == [{
-        "code": "open_polyline",
-        "severity": "warning",
-        "message": "Polyline endpoints are nearly coincident but the polyline is not marked closed; verify the intended boundary.",
-        "entity_id": "R-P",
-        "location": near_closed.centroid,
-    }]
+    assert len(warnings) == 1
+    finding = warnings[0]
+    assert finding["code"] == "open_polyline"
+    assert finding["severity"] == "warning"
+    assert finding["message"] == "Polyline endpoints are nearly coincident but the polyline is not marked closed; verify the intended boundary."
+    assert finding["entity_id"] == "R-P"
+    assert finding["location"] == near_closed.centroid
+    assert finding["entity_type"] == "LWPOLYLINE"
+    assert finding["blocks_reference"] is False
+    assert "nearly coincident" in finding["explanation"]
+    assert "PEDIT" in finding["suggested_correction"]
 
 def test_near_closure_classification_is_scale_consistent_for_mm_and_cm():
     millimeters = _polyline(
@@ -269,3 +273,141 @@ def test_large_synthetic_reference_analysis_is_bounded_and_warning_free():
     assert analysis == analyze_assignment(drawing)
     assert validation["summary"]["supported_entities"] == len(entities)
     assert elapsed < 5
+
+
+def test_critical_finding_schema_with_complete_and_missing_metadata():
+    line_complete = _line("R-LINE-1", (5, 5), (5, 5))
+    line_complete.source_handle = "4F"
+    line_complete.layer = "WALLS"
+
+    drawing = Drawing([line_complete], (5, 5, 5, 5), units="mm", units_code=4)
+    result = validate_reference(drawing)
+
+    assert result["can_continue"] is False
+    assert result["valid"] is False
+    assert result["summary"]["critical"] == 1
+
+    findings = [f for f in result["findings"] if f["code"] == "zero_length"]
+    assert len(findings) == 1
+    finding = findings[0]
+
+    # Preserved existing fields
+    assert finding["code"] == "zero_length"
+    assert finding["severity"] == "critical"
+    assert finding["message"] == "A zero-length line makes the reference invalid."
+    assert finding["entity_id"] == "R-LINE-1"
+    assert finding["location"] == (5.0, 5.0)
+
+    # Added enriched fields
+    assert finding["entity_type"] == "LINE"
+    assert finding["source_handle"] == "4F"
+    assert finding["layer"] == "WALLS"
+    assert finding["blocks_reference"] is True
+    assert "identical start and end points" in finding["explanation"]
+    assert "Inspect the identified entity in AutoCAD" in finding["suggested_correction"]
+    assert "review the result before saving" in finding["suggested_correction"]
+
+    # Critical finding with missing optional metadata
+    circle_missing = Entity(
+        id="R-CIRC-1",
+        kind="circle",
+        layer=None,  # type: ignore[arg-type]
+        points=[(0, 0)],
+        radius=0,
+        source_handle=None,
+        centroid=None,
+    )
+    result_missing = validate_reference(Drawing([circle_missing], (0, 0, 0, 0), units="mm", units_code=4))
+    zero_radius = [f for f in result_missing["findings"] if f["code"] == "zero_radius"][0]
+    assert zero_radius["entity_type"] == "CIRCLE"
+    assert zero_radius["source_handle"] is None
+    assert zero_radius["layer"] is None
+    assert zero_radius["location"] is None
+    assert zero_radius["blocks_reference"] is True
+    assert "non-positive or zero radius" in zero_radius["explanation"]
+    assert "Properties" in zero_radius["suggested_correction"]
+
+
+def test_warning_finding_schema_with_complete_and_missing_metadata():
+    first = _line("R-1", (0, 0), (10, 0))
+    first.source_handle = "H1"
+    first.layer = "VISIBLE"
+    dup = _line("R-2", (0, 0), (10, 0))
+    dup.source_handle = "H2"
+    dup.layer = "VISIBLE"
+
+    unsupported = [{"entity_type": "HATCH", "handle": "H3", "layer": "HATCHES"}]
+    drawing = Drawing([first, dup], (0, 0, 10, 0), units="mm", units_code=4, unsupported_entities=unsupported)
+    result = validate_reference(drawing)
+
+    assert result["can_continue"] is True
+    assert result["valid"] is True
+    assert result["summary"]["critical"] == 0
+
+    # Duplicate geometry warning with complete metadata
+    dup_finding = [f for f in result["findings"] if f["code"] == "duplicate_geometry"][0]
+    assert dup_finding["code"] == "duplicate_geometry"
+    assert dup_finding["severity"] == "warning"
+    assert dup_finding["entity_id"] == "R-2"
+    assert dup_finding["entity_type"] == "LINE"
+    assert dup_finding["source_handle"] == "H2"
+    assert dup_finding["layer"] == "VISIBLE"
+    assert dup_finding["blocks_reference"] is False
+    assert "Multiple identical entities" in dup_finding["explanation"]
+    assert "OVERKILL" in dup_finding["suggested_correction"]
+
+    # Unsupported entity warning
+    unsup_finding = [f for f in result["findings"] if f["code"] == "unsupported_entity"][0]
+    assert unsup_finding["code"] == "unsupported_entity"
+    assert unsup_finding["severity"] == "warning"
+    assert unsup_finding["entity_id"] is None
+    assert unsup_finding["location"] is None
+    assert unsup_finding["entity_type"] == "HATCH"
+    assert unsup_finding["source_handle"] == "H3"
+    assert unsup_finding["layer"] == "HATCHES"
+    assert unsup_finding["blocks_reference"] is False
+    assert "not supported" in unsup_finding["explanation"]
+
+    # Missing units warning (drawing-level, missing entity metadata)
+    drawing_no_units = Drawing([first], (0, 0, 10, 0), units="unitless", units_code=0)
+    result_no_units = validate_reference(drawing_no_units)
+    units_finding = [f for f in result_no_units["findings"] if f["code"] == "missing_units"][0]
+    assert units_finding["code"] == "missing_units"
+    assert units_finding["severity"] == "warning"
+    assert units_finding["entity_id"] is None
+    assert units_finding["location"] is None
+    assert units_finding["entity_type"] is None
+    assert units_finding["source_handle"] is None
+    assert units_finding["layer"] is None
+    assert units_finding["blocks_reference"] is False
+    assert "UNITS" in units_finding["suggested_correction"]
+
+
+def test_unknown_finding_code_fallback():
+    from app.validator import _finding
+
+    critical_custom = _finding("custom_error_code", "critical", "Custom failure occurred.")
+    assert critical_custom["code"] == "custom_error_code"
+    assert critical_custom["severity"] == "critical"
+    assert critical_custom["blocks_reference"] is True
+    assert critical_custom["explanation"] == "Custom failure occurred."
+    assert "AutoCAD" in critical_custom["suggested_correction"]
+
+    warning_custom = _finding("custom_warning_code", "warning", "Custom warning occurred.")
+    assert warning_custom["code"] == "custom_warning_code"
+    assert warning_custom["severity"] == "warning"
+    assert warning_custom["blocks_reference"] is False
+    assert warning_custom["explanation"] == "Custom warning occurred."
+    assert "AutoCAD" in warning_custom["suggested_correction"]
+
+
+def test_blocks_reference_strictly_aligns_with_critical_severity():
+    from app.validator import _finding
+
+    for code in ("zero_length", "zero_radius"):
+        finding = _finding(code, "critical", "message")
+        assert finding["blocks_reference"] is True
+
+    for code in ("missing_units", "open_polyline", "duplicate_geometry", "extreme_coordinates", "inconsistent_layers"):
+        finding = _finding(code, "warning", "message")
+        assert finding["blocks_reference"] is False
