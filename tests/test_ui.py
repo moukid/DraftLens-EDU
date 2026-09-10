@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 from html.parser import HTMLParser
 import json
 from pathlib import Path
@@ -483,7 +484,7 @@ def test_student_only_toggle_is_constant_time_and_preserves_review_and_selection
 
 
 def test_translation_review_svg_keeps_student_geometry_in_submitted_coordinates():
-    fixtures = Path(__file__).parent / "fixtures" / "simple_audit-II"
+    fixtures = fixture_root() / "simple_audit-II"
     reference_path = fixtures / "01-ARC-Reference.dxf"
     student_path = fixtures / "01-ARC-All-Moved.dxf"
     with reference_path.open("rb") as reference:

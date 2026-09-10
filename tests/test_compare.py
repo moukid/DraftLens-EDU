@@ -1,9 +1,10 @@
+from tests.synthetic_data import fixture_root, samples_root
 from pathlib import Path
 from app.compare import compare_drawings
 from app.dxf import parse_dxf_path
 from app.models import Drawing, Entity
 from app.rubric import default_rubric
-S=Path(__file__).parents[1]/"samples"
+S=samples_root()
 def test_good_scores_full(): assert compare_drawings(parse_dxf_path(S/"reference.dxf"),parse_dxf_path(S/"student_good.dxf"))["score"]==100
 def test_missing_wall_detected(): assert "MISSING_WALL" in {i["code"] for i in compare_drawings(parse_dxf_path(S/"reference.dxf"),parse_dxf_path(S/"student_missing_wall.dxf"))["issues"]}
 def test_door_window_detected():

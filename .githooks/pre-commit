@@ -1,0 +1,14 @@
+#!/bin/sh
+# Check the entire index, including files added with git add -f.
+if [ -x .venv/Scripts/python.exe ]; then
+    exec .venv/Scripts/python.exe -B scripts/check_cad_policy.py
+elif [ -x .venv/bin/python ]; then
+    exec .venv/bin/python -B scripts/check_cad_policy.py
+elif command -v python3 >/dev/null 2>&1; then
+    exec python3 -B scripts/check_cad_policy.py
+elif command -v python >/dev/null 2>&1; then
+    exec python -B scripts/check_cad_policy.py
+else
+    echo "CAD policy: Python is required; commit blocked." >&2
+    exit 1
+fi

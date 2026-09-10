@@ -4,3 +4,7 @@ __pycache__/
 *.py[cod]
 .env
 
+
+# Permanent policy: CAD files belong outside this repository (all letter cases).
+*.[dD][xX][fF]
+*.[dD][wW][gG]

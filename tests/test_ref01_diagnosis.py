@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 import math
 from pathlib import Path
 import pytest
@@ -6,7 +7,7 @@ from app.dxf import parse_dxf_bytes
 from app.review_service import run_grading_pipeline, reference_fingerprint
 from app.rubric import default_rubric
 
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "ref_01"
+FIXTURE_DIR = fixture_root() / "ref_01"
 REF_PATH = FIXTURE_DIR / "Ref-01.dxf"
 
 
@@ -62,7 +63,7 @@ def test_ref01_t000_exact_baseline(ref_bytes, ref_fingerprint):
 
 
 def test_ref01_t001_one_independently_moved_rectangle(ref_bytes, ref_fingerprint):
-    """Ref-01-t001 has one polyline rectangle (2AC) moved by 17.100 units.
+    """Ref-01-t001 has one polyline rectangle (2AC) moved by 17 units.
     Strict: 97.0 (1 position deduction).
     Tolerant: 100.0 (independent placement difference suppressed; 0 issues)."""
     strict_out = _grade_fixture(ref_bytes, ref_fingerprint, "Ref-01-t001.dxf", mode="strict")
@@ -83,7 +84,7 @@ def test_ref01_t001_one_independently_moved_rectangle(ref_bytes, ref_fingerprint
 
 
 def test_ref01_t002_fatal_error_diagnosis_and_compatibility(ref_bytes, ref_fingerprint):
-    """Ref-01-t002 moves all entities in 10 different displacement directions.
+    """Ref-01-t002 moves all entities with weak displacement consensus.
     Strict: Controlled compatibility rejection ('suspicious') or 78.0 with instructor override.
     Tolerant: 100.0, compatible, not withheld, 16 matches, 0 missing/extra."""
     out = _grade_fixture(ref_bytes, ref_fingerprint, "Ref-01-t002.dxf", mode="strict", instructor_override=False)
@@ -118,7 +119,7 @@ def test_ref01_t002_fatal_error_diagnosis_and_compatibility(ref_bytes, ref_finge
 
 
 def test_ref01_t003_four_moved_entities(ref_bytes, ref_fingerprint):
-    """Ref-01-t003 moves 4 lines forming rectangle 1 by 27.657 units.
+    """Ref-01-t003 moves 4 lines forming rectangle 1 by sqrt(800) units.
     Strict: 4 position errors (-3 each) -> 88.0.
     Tolerant: 100.0 (independent placement differences suppressed; 0 issues)."""
     strict_out = _grade_fixture(ref_bytes, ref_fingerprint, "Ref-01-t003.dxf", mode="strict")
@@ -171,7 +172,7 @@ def test_ref01_t004_eight_moved_entities_and_rubric_repeat_cap(ref_bytes, ref_fi
 
 
 def test_ref01_t005_rotated_line(ref_bytes, ref_fingerprint):
-    """Ref-01-t005 rotates 1 line (2AE) from 157.411 to 23.899 deg.
+    """Ref-01-t005 rotates 1 line (2AE) from 143.13 to 160 deg.
     Scores 97.0 in both strict and tolerant modes (1 angle deduction)."""
     for mode in ("strict", "translation"):
         out = _grade_fixture(ref_bytes, ref_fingerprint, "Ref-01-t005.dxf", mode=mode)

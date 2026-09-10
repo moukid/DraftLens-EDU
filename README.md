@@ -427,242 +427,31 @@ http://127.0.0.1:8000
 
 ---
 
-## Included sample set
+## Test files and repository policy
 
-The repository contains four anonymized sample families:
+No sample DXF files are included. DXF and DWG files must not be added,
+tracked, committed, or uploaded to this repository.
 
-```text
-samples/
-├─ basic_geometry/
-│  ├─ reference.dxf
-│  ├─ student_missing_line.dxf
-│  ├─ student_should_score_100.dxf
-│  └─ expected_result.md
-│
-├─ complex_pattern/
-│  ├─ reference_complex_pattern.dxf
-│  ├─ student_complex_pattern_multi_error.dxf
-│  ├─ student_complex_pattern_score_100.dxf
-│  ├─ student_complex_pattern_translated.dxf
-│  └─ expected_result.md
-│
-├─ interior_plan/
-│  ├─ reference_clean.dxf
-│  ├─ student_two_moved_arcs.dxf
-│  ├─ whole_plan_translated.dxf
-│  └─ expected_result.md
-│
-└─ incompatible/
-   ├─ reference_Interior_Plan_CLEAN_108_Entities.dxf
-   ├─ wrong_assignment.dxf
-   └─ expected_result.md
+Testers must provide their own reference and student files, stored locally
+outside the repository. Test files should not contain confidential or personal
+information. Use the existing DXF upload workflow; this policy does not change
+upload functionality or add DWG support.
+
+Automated tests generate synthetic geometry in external temporary directories;
+no personal or historical DXF fixture files are required.
+
+After cloning, install the commit guard:
+
+```powershell
+python scripts/install_git_hooks.py
+python scripts/check_cad_policy.py
 ```
 
-The `expected_result.md` file inside each folder records the verified outcome, placement policy, score, finding counts, and PDF behavior for that sample family.
-
-The complex-pattern multi-error sample is intentionally advanced. It demonstrates repeated-geometry analysis, rule-repeat caps, compact issue summaries, multiple issue types, and supporting topology evidence. It is not intended to represent one isolated student mistake.
-
----
-
-## Judge quick test
-
-The repository includes anonymized DXF samples under `samples/`.
-
-### Test A — basic geometry exact copy
-
-Use:
-
-```text
-Reference:
-samples/basic_geometry/reference.dxf
-
-Student:
-samples/basic_geometry/student_should_score_100.dxf
-```
-
-Expected:
-
-```text
-Compatibility: Compatible
-Score: 100 / 100
-Primary issues: 0
-PDF report: Available
-```
-
-### Test B — basic geometry missing line
-
-Use:
-
-```text
-Reference:
-samples/basic_geometry/reference.dxf
-
-Student:
-samples/basic_geometry/student_missing_line.dxf
-```
-
-Expected:
-
-```text
-Compatibility: Compatible
-Score: 95 / 100
-Primary issue: Missing Geometry
-Completion deduction: 5 points
-PDF report: Available
-```
-
-### Test C — complex pattern exact copy
-
-Use:
-
-```text
-Reference:
-samples/complex_pattern/reference_complex_pattern.dxf
-
-Student:
-samples/complex_pattern/student_complex_pattern_score_100.dxf
-```
-
-Expected:
-
-```text
-Compatibility: Compatible
-Score: 100 / 100
-Primary issues: 0
-Supporting findings: 0
-PDF report: Available
-```
-
-### Test D — complex pattern multi-error analysis
-
-Use:
-
-```text
-Reference:
-samples/complex_pattern/reference_complex_pattern.dxf
-
-Student:
-samples/complex_pattern/student_complex_pattern_multi_error.dxf
-```
-
-Verified result:
-
-```text
-Compatibility: Compatible
-Score: 74 / 100
-Primary findings: 60
-Supporting findings: 20
-Geometric accuracy: 44 / 65
-Completion: 20 / 25
-File quality: 10 / 10
-PDF report: Available, 8 pages
-```
-
-This sample intentionally contains multiple changes. It demonstrates:
-
-- 57 Incorrect Position findings;
-- a Missing Geometry finding;
-- Incorrect Length findings;
-- rule-repeat caps;
-- compact finding summaries;
-- supporting endpoint-gap evidence that is not deducted again.
-
-### Test E — complex pattern global translation
-
-Use:
-
-```text
-Reference:
-samples/complex_pattern/reference_complex_pattern.dxf
-
-Student:
-samples/complex_pattern/student_complex_pattern_translated.dxf
-```
-
-Expected under Strict placement:
-
-```text
-Compatibility: Compatible
-Score: 50 / 100
-One Global Drawing Displacement issue
-Detected displacement: X = 75, Y = -40
-```
-
-The interior-plan translation sample below is the preferred quick demonstration because it is visually easier to explain.
-
-### Test F — interior-plan placement policy
-
-Use:
-
-```text
-Reference:
-samples/interior_plan/reference_clean.dxf
-
-Student:
-samples/interior_plan/whole_plan_translated.dxf
-```
-
-Expected:
-
-```text
-Strict placement:
-Compatible
-Score: 50 / 100
-One Global Drawing Displacement issue
-Detected displacement: X = 100, Y = -50
-
-Translation-tolerant placement:
-Compatible
-Score: 100 / 100
-Accepted translation displayed
-```
-
-### Test G — two moved arcs
-
-Use:
-
-```text
-Reference:
-samples/interior_plan/reference_clean.dxf
-
-Student:
-samples/interior_plan/student_two_moved_arcs.dxf
-```
-
-Expected:
-
-```text
-Compatibility: Compatible
-Score: 97 / 100
-Primary issues: 1
-Supporting findings: 2
-Applied deduction: 3 points
-PDF report: Available
-```
-
-### Test H — wrong-assignment protection
-
-Use:
-
-```text
-Reference:
-samples/incompatible/reference_Interior_Plan_CLEAN_108_Entities.dxf
-
-Student:
-samples/incompatible/wrong_assignment.dxf
-```
-
-Expected:
-
-```text
-Compatibility: Incompatible
-Confidence: High
-Score: Not graded
-Primary issues: 0
-Supporting findings: 0
-Reviewed snapshot: Not created
-PDF report: Unavailable before explicit Grade anyway override
-```
+Ignore rules cover both extensions in every letter case. The commit guard also
+rejects force-staged CAD files. CI checks the index and full reachable history.
+Hooks must be installed in every clone; the owner should require the CI policy
+job in branch protection. See [the permanent policy](docs/fixture_privacy_verification.md)
+for setup, manual synthetic-data generation, privacy checks, and history verification.
 
 ### Manual workflow
 
@@ -684,42 +473,17 @@ PDF report: Unavailable before explicit Grade anyway override
 
 ## Automated tests
 
-Run:
-
 ```powershell
-pytest -q
+pip install -r requirements-dev.txt
+python -B -m pytest -q -p no:cacheprovider
+python scripts/check_cad_policy.py --history
 ```
 
-Final verified release:
+The full suite runs with generated synthetic data outside the repository.
+It covers grading, compatibility, topology, uploads, reports, UI contracts,
+privacy detection and CAD-file commit enforcement. A full clone is required
+only for the separate history-policy command, not for pytest.
 
-```text
-304 passed
-0 failed
-0 skipped
-0 xfailed
-0 xpassed
-```
-
-Seven warnings are third-party `PyparsingDeprecationWarning` messages originating from `ezdxf/queryparser.py`. They do not currently affect DraftLens runtime behavior.
-
-Manual sample verification also confirmed:
-
-- basic exact copy: 100 / 100;
-- basic missing line: 95 / 100;
-- complex exact copy: 100 / 100;
-- complex multi-error: 74 / 100 with 60 primary and 20 supporting findings;
-- translated interior plan under Strict placement: 50 / 100;
-- two moved arcs: 97 / 100 with two non-scoring supporting topology findings;
-- unrelated assignment file: Incompatible and Not graded.
-
-Additional verified gates:
-
-- Python compilation passed for 45 files;
-- JavaScript syntax validation passed;
-- `pip check` reported no broken requirements;
-- `git diff --check` passed.
-
----
 
 ## Release information
 

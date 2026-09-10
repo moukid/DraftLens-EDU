@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.synthetic_data import fixture_root, samples_root
+
 import math
 from copy import deepcopy
 import pytest
@@ -519,7 +521,7 @@ def test_adv19_fallback_default_invariance_detects_position_error():
     from pathlib import Path
     from app.review_service import run_grading_pipeline
 
-    fixture_dir = Path(__file__).parent / "fixtures" / "simple_audit"
+    fixture_dir = fixture_root() / "simple_audit"
     ref_path = fixture_dir / "00_reference_000-Simple.dxf"
     moved_path = fixture_dir / "04_moved_line_73B_plus20Y.dxf"
     assert ref_path.exists() and moved_path.exists(), "simple_audit fixtures missing"
@@ -552,11 +554,10 @@ def test_adv20_strict_override_invariance_t002():
     from pathlib import Path
     from app.review_service import run_grading_pipeline, reference_fingerprint
 
-    ref_dir = Path(__file__).parent / "fixtures" / "ref_01"
+    ref_dir = fixture_root() / "ref_01"
     ref_path = ref_dir / "Ref-01.dxf"
     t002_path = ref_dir / "Ref-01-t002.dxf"
-    if not ref_path.exists() or not t002_path.exists():
-        pytest.skip("Ref-01 fixtures not found")
+    assert ref_path.exists() and t002_path.exists(), "Required synthetic Ref-01 cases missing"
 
     ref_bytes = ref_path.read_bytes()
     t002_bytes = t002_path.read_bytes()

@@ -1,34 +1,87 @@
-# DXF Fixture Privacy Verification and CI Separation
+# Permanent CAD-file repository policy
 
-DraftLens EDU separates automated continuous integration (CI) testing from explicit historical privacy audits.
+No DXF or DWG files are included or permitted in the repository, in any
+capitalization, directory, branch, tag, or newly published history.
+Sanitizing metadata is not an exception. Do not embed personal drawings as
+base64, archives, LFS objects, or renamed files to evade this policy.
 
-## 1. Automated Continuous Integration (Default Pytest)
+## Personal and manual testing
 
-Default `pytest` execution is completely **independent of private Git history**.
+Keep reference drawings and student drawings in a local directory **outside**
+the checkout. Testers must provide their own files. Do not use confidential
+or personal information. Do not attach drawings to commits, pull requests,
+issue comments, releases, or CI artifacts.
 
-- All permanent CI privacy regression tests run against current repository files and in-memory synthetic buffers.
-- Default CI requires no historical Git objects, shallow clone workarounds, or access to sensitive pre-release commits.
-- Users and automated CI runners must **not** fetch, pull, or publish sensitive historical Git commits to execute test suites.
+The application still accepts DXF uploads through its existing browser/API
+workflow; repository restrictions do not disable uploads. DWG support has not
+been added. Uploaded files are not Git fixtures.
 
-To run the standard automated privacy suite:
+## Developer setup
 
-```powershell
-python -m pytest tests/test_fixture_privacy.py -v
-```
-
-## 2. Explicit Local Historical Audit Command
-
-Auditing historical DXF fixture privacy against past commits is an **explicit, optional local audit** performed outside the pytest suite.
-
-### Usage
+After cloning and installing Python, run:
 
 ```powershell
-python -B scripts/verify_local_fixture_history.py --commit <LOCAL_COMMIT_SHA>
+python scripts/install_git_hooks.py
+python scripts/check_cad_policy.py
+python -B -m pytest -q -p no:cacheprovider
 ```
 
-### Key Properties
+The installer enables the versioned pre-commit guard in this clone only.
+It refuses to replace a different hook configuration. Integrate the guard
+manually if another hook framework is already in use.
 
-- **Explicit invocation**: The audit script is located in `scripts/verify_local_fixture_history.py` (outside `tests/`) and is never collected or executed by `pytest`.
-- **Requires local Git objects**: The specified `<LOCAL_COMMIT_SHA>` must already exist in your local Git repository. The script does not automatically fetch or download remote history.
-- **Fail-closed verification**: If Git is unavailable, the commit does not exist, any fixture cannot be read, input counts mismatch, or fixtures fail to trigger expected scanner detections, the command exits with a nonzero exit code (1). Missing inputs cause a failure, never a silent skip.
-- **Redacted diagnostics**: All diagnostics suppress raw historical bytes, personal usernames, local workstation paths, and subprocess output.
+Case-insensitive ignore rules prevent ordinary staging. The hook checks the
+entire index, so a CAD file force-staged with `git add -f` still blocks a
+normal commit. New clones must install hooks; Git does not install them
+automatically. A determined user can bypass local hooks. The CI job also
+checks the index and all reachable commit trees, and runs the full suite.
+The repository owner must require that job in branch protection to enforce
+the merge gate remotely. No local tool can promise to prevent deliberate
+bypasses or uploads made outside Git.
+
+## Automated data and privacy checks
+
+All repository tests run without downloaded or historical drawing files.
+`tests/synthetic_data.py` builds 36 fresh drawings from elementary geometric
+specifications in a process-owned temporary directory outside the checkout.
+They are not copies or encodings of removed personal fixtures and are deleted
+when the process exits. Historical scenario filenames are labels only.
+Assertions still cover exact matches, defects, topology, repeated geometry,
+translation tolerance, compatibility, API uploads, review export and PDF/UI
+behavior. Some coordinate assertions use the documented synthetic coordinates;
+production grading code is unchanged.
+
+`tests/test_fixture_privacy.py` checks generated metadata and the generic
+redaction/detection helpers. Ordinary pytest never needs old Git objects.
+Policy tests exercise both DXF and DWG, mixed-case/nested filenames, ignored
+staging, forced staging, rejected commits, safe commits, deleted historical
+files, shallow clones and fail-closed behavior.
+
+For an optional synthetic manual demo, explicitly choose an external directory:
+
+```powershell
+python scripts/generate_samples.py --output-dir C:\Temp\DraftLensSyntheticDemo
+```
+
+The generator refuses destinations inside the repository.
+
+## Release and history audit
+
+With a full clone:
+
+```powershell
+python scripts/check_cad_policy.py --history
+git status --short
+```
+
+A pass covers the index and all commits reachable from local refs. A shallow
+clone is rejected for history auditing; ordinary tests remain shallow-clone
+compatible. Audit the exact refs that will be published. Remote branches,
+tags, forks, cached PR refs, LFS, releases and previously downloaded copies
+require separate owner-controlled review; a local rewrite cannot erase them.
+
+The former metadata-only repair and its local verification procedure are
+superseded for publication by complete CAD-path removal. The optional legacy
+`scripts/verify_local_fixture_history.py` is forensic tooling for private
+pre-removal recovery copies only, not a release gate or ordinary CI test.
+Do not restore old fixture blobs to run it in a cleaned repository.

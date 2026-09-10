@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 from datetime import datetime, timedelta, timezone
 import hashlib
 import io
@@ -14,9 +15,9 @@ from app.main import REVIEW_SNAPSHOTS, app
 
 
 ROOT = Path(__file__).parents[1]
-SAMPLES = ROOT / "samples"
-AUDIT = ROOT / "tests" / "fixtures" / "simple_audit"
-AUDIT_II = ROOT / "tests" / "fixtures" / "simple_audit-II"
+SAMPLES = samples_root()
+AUDIT = fixture_root() / "simple_audit"
+AUDIT_II = fixture_root() / "simple_audit-II"
 client = TestClient(app)
 
 

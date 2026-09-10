@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.synthetic_data import fixture_root, samples_root
+
 from pathlib import Path
 
 import pytest
@@ -9,7 +11,7 @@ from app.main import app
 
 
 client = TestClient(app)
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = fixture_root()
 ARCS = FIXTURES / "simple_audit-II"
 AUDIT = FIXTURES / "simple_audit"
 
@@ -119,12 +121,12 @@ def test_all_moved_arcs_expose_accepted_translation_evidence():
     assert body["normalization_mode"] == "translation"
     assert decision["requested_mode"] == decision["applied_mode"] == "translation"
     assert decision["transform_applied"] is True
-    assert decision["selected_translation"] == pytest.approx([-34.555427, 0])
-    assert decision["candidate_translation"] == pytest.approx([-34.555427, 0])
+    assert decision["selected_translation"] == pytest.approx([-30, 0])
+    assert decision["candidate_translation"] == pytest.approx([-30, 0])
     assert decision["support_count"] == decision["evidence_count"] == 3
     assert decision["support_ratio"] == 1
     assert decision["confidence"] == "high"
-    assert decision["total_error_reduction"] == pytest.approx(103.666279)
+    assert decision["total_error_reduction"] == pytest.approx(90)
     assert decision["error_reduction_ratio"] == 1
     assert decision["rejection_reason"] is None
 
@@ -155,7 +157,7 @@ def test_two_moved_arcs_remain_two_local_position_errors(mode):
         assert body["score"] == 100
         assert len(positions) == 0
         decision = body["normalization_decision"]
-        assert decision["candidate_translation"] == pytest.approx([-31.349252, 0.356078])
+        assert decision["candidate_translation"] == pytest.approx([-20, 2])
         assert decision["support_count"] == 2
         assert decision["evidence_count"] == 3
         assert decision["rejection_reason"] == "insufficient_support"

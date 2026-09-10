@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 from pathlib import Path
 import io
 import xml.etree.ElementTree as ET
@@ -6,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import RUBRIC_REFERENCES, RUBRICS, app
 from app.rubric import default_rubric
-S=Path(__file__).parents[1]/"samples"; client=TestClient(app)
-A=Path(__file__).parent/"fixtures"/"simple_audit"
-AUDIT_II=Path(__file__).parent/"fixtures"/"simple_audit-II"
+S=samples_root(); client=TestClient(app)
+A=fixture_root()/"simple_audit"
+AUDIT_II=fixture_root()/"simple_audit-II"
 AUDIT_REFERENCE=A/"00_reference_000-Simple.dxf"
 AUDIT_MISSING=A/"02_missing_line_73B.dxf"
 def test_health(): assert client.get('/health').json()=={"status":"ok"}

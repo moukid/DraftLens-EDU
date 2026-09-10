@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 from copy import deepcopy
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from app.models import Drawing, Entity
 from app.rubric import default_rubric
 
 
-FIXTURES = Path(__file__).parent / "fixtures" / "simple_audit-II"
+FIXTURES = fixture_root() / "simple_audit-II"
 
 
 def _rubric(mode="translation"):

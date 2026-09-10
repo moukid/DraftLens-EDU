@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.synthetic_data import fixture_root, samples_root
+
 from pathlib import Path
 
 import pytest
@@ -141,7 +143,7 @@ def test_unmatched_and_duplicate_evidence_is_measurable_and_entity_aware():
     assert duplicate["coincident_entity_id"] == "S-KEEP"
 
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = fixture_root()
 
 
 def fixture_drawing(directory: str, filename: str, source: str) -> Drawing:

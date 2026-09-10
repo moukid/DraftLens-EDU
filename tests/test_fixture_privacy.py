@@ -1,6 +1,6 @@
 """Regression and enforcement tests for DXF fixture and sample privacy.
 
-Scans all public DXF files (samples and test fixtures) for generic identifying paths:
+Scans procedurally generated temporary DXF test data for generic identifying paths:
 - Windows absolute user and workstation paths (backslash and forward-slash)
 - Windows user profile and legacy Documents and Settings paths
 - Extended Windows paths (\\?\\...)
@@ -117,32 +117,17 @@ def discover_public_dxf_files(repo_root: pathlib.Path | None = None) -> list[pat
 # Core Test Suite
 # =============================================================================
 
-def test_all_public_dxf_files_are_privacy_safe():
-    """Verify every public DXF file across samples and fixtures is free of identifying metadata."""
-    repo_root = get_repo_root()
-    files = discover_public_dxf_files(repo_root)
-
-    # Verify coverage baselines (minimum counts, no permanent ceiling)
-    sample_files = [f for f in files if "samples" in f.parts]
-    legacy_files = [f for f in files if any(p in {"simple_audit", "simple_audit-II"} for p in f.parts)]
-    ref01_files = [f for f in files if "ref_01" in f.parts]
-
-    assert len(sample_files) >= 12, f"Expected at least 12 sample DXFs, found {len(sample_files)}"
-    assert len(legacy_files) >= 23, f"Expected at least 23 legacy test fixtures, found {len(legacy_files)}"
-    assert len(ref01_files) >= 9, f"Expected at least 9 Ref-01 fixtures, found {len(ref01_files)}"
-
-    all_findings: list[str] = []
-    for p in files:
-        rel_path = str(p.relative_to(repo_root)).replace("\\", "/")
-        content = safe_read_file(p, repo_root)
-        findings = scan_text_for_privacy_violations(content, rel_filename=rel_path)
-        if findings:
-            all_findings.extend(findings)
-
-    assert not all_findings, (
-        f"Privacy violations found in public DXF files ({len(all_findings)} occurrences):\n"
-        + "\n".join(f"  {finding}" for finding in all_findings)
-    )
+def test_all_generated_dxf_files_are_privacy_safe():
+    """Generated repository-test data must also have privacy-safe metadata."""
+    from tests.synthetic_data import data_root
+    root = data_root()
+    files = sorted(root.rglob("*.dxf"))
+    assert len(files) == 36
+    findings = []
+    for path in files:
+        findings.extend(scan_text_for_privacy_violations(
+            safe_read_file(path, root), rel_filename=path.relative_to(root).as_posix()))
+    assert not findings, "\n".join(findings)
 
 
 # =============================================================================

@@ -1,3 +1,4 @@
+from tests.synthetic_data import fixture_root, samples_root
 from pathlib import Path
 import io
 import ezdxf
@@ -6,7 +7,7 @@ import pytest
 from app.dxf import DXFParseError, entity_length, parse_dxf_bytes, parse_dxf_path
 
 
-SAMPLES = Path(__file__).parents[1] / "samples"
+SAMPLES = samples_root()
 
 
 def test_translation_parse_preserves_absolute_reference_coordinates():
