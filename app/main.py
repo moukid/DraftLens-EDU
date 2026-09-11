@@ -2,7 +2,7 @@ from __future__ import annotations
 import html,os,uuid
 from dataclasses import dataclass
 from pathlib import Path
-from fastapi import FastAPI,File,Form,HTTPException,UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment,FileSystemLoader,select_autoescape
@@ -206,14 +206,17 @@ async def review(
     return snapshot.review_response
 
 @app.get("/api/reviews/{review_id}/report.pdf")
-def download_pdf_report(review_id: str):
+def download_pdf_report(
+    review_id: str,
+    include_appendix: bool = Query(False),
+):
     try:
         snapshot = REVIEW_SNAPSHOTS.get(review_id)
     except SnapshotExpired as exc:
         raise HTTPException(410, "The review report has expired. Generate a new review.") from exc
     except SnapshotNotFound as exc:
         raise HTTPException(404, "The review report was not found.") from exc
-    pdf = generate_pdf(snapshot)
+    pdf = generate_pdf(snapshot, include_appendix=include_appendix)
     return Response(
         content=pdf,
         media_type="application/pdf",

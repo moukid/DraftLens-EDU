@@ -349,7 +349,12 @@ def _normalization_summary(snapshot: ReviewSnapshot) -> str:
             f"Reason: {decision.get('rejection_reason') or 'accepted consensus transform'}.")
 
 
-def _issue_story(issue: dict[str, Any], styles: dict[str, ParagraphStyle], width: float) -> list[Flowable]:
+def _issue_story(
+    issue: dict[str, Any],
+    styles: dict[str, ParagraphStyle],
+    width: float,
+    linked_supporting: list[dict[str, Any]] | None = None,
+) -> list[Flowable]:
     expected, actual, deviation = _measurement(issue); guidance = issue.get("correction_guidance") or {}
     title = str(issue.get("category") or "finding").replace("_"," ").title()
     rows = [("Severity",issue.get("severity"),"Finding role",issue.get("finding_role")),
@@ -385,6 +390,35 @@ def _issue_story(issue: dict[str, Any], styles: dict[str, ParagraphStyle], width
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
         output.extend([Spacer(1, 3), _p("How to correct", styles["h2"]), correction])
+    if linked_supporting:
+        sup_rows = [[
+            _p("Supporting issue", styles["small"]),
+            _p("Category", styles["small"]),
+            _p("Technical feedback", styles["small"]),
+        ]]
+        for sup in linked_supporting:
+            sup_title = str(sup.get("category") or "topology").replace("_", " ").title()
+            sup_rows.append([
+                _p(sup.get("issue_id", "Issue"), styles["body"]),
+                _p(sup_title, styles["body"]),
+                _p(sup.get("technical_feedback") or "Supporting topology evidence", styles["body"]),
+            ])
+        sup_table = Table(sup_rows, colWidths=[width * .25, width * .25, width * .5], splitByRow=0)
+        sup_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fbf4f9")),
+            ("BOX", (0, 0), (-1, -1), .5, colors.HexColor("#d53f8c")),
+            ("INNERGRID", (0, 0), (-1, -1), .25, colors.HexColor("#e8b4cb")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        output.extend([
+            Spacer(1, 3),
+            _p("Supporting topology findings (linked evidence)", styles["h2"]),
+            sup_table,
+        ])
     output.append(Spacer(1,5)); return output
 
 
@@ -433,12 +467,17 @@ def _finding_summary_story(
 
 
 
-def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
+def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) -> bytes:
     """Generate a deterministic authoritative report without invoking grading."""
     styles, output = _styles(), BytesIO()
     document = SimpleDocTemplate(output,pagesize=A4,leftMargin=16*mm,rightMargin=16*mm,topMargin=15*mm,bottomMargin=16*mm,title="DraftLens EDU Drawing Assessment Report",author="DraftLens EDU",subject=f"Authoritative review {snapshot.review_id}")
     width = A4[0]-document.leftMargin-document.rightMargin; response = snapshot.review_response; counts = response.get("finding_counts") or {}; score = response.get("score",0)
-    story: list[Flowable] = [_p("DraftLens EDU",styles["title"]),_p("Drawing Assessment Report",styles["subtitle"]),_metadata_table(snapshot,styles,width),Spacer(1,6)]
+    presentation = response.get("finding_presentation") or {}
+    unsupported_summary = presentation.get("unsupported_summary") or {}
+    unsupported_count = counts.get("unsupported_entities", 0)
+
+    # --- PAGE 1: Assessment Summary ---
+    story: list[Flowable] = [_p("DraftLens EDU",styles["title"]),_p("Drawing Assessment Report",styles["subtitle"]),_metadata_table(snapshot,styles,width),Spacer(1,4)]
     if response.get("instructor_override") is True:
         status = str(response.get("compatibility_status") or "suspicious").replace("_", " ")
         story.extend([
@@ -456,9 +495,27 @@ def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
         _p(f"Rubric source: {response.get('rubric_template_name', 'DraftLens Baseline Rubric')} ({str(response.get('rubric_source', 'baseline_template')).replace('_', ' ')}).", styles["small"])
     )
     score_table = Table([[_p(f"{_number(score)} / 100",styles["score"]),_p("Primary issues",styles["small"]),_p("Supporting",styles["small"]),_p("Reference notes",styles["small"]),_p("Unsupported",styles["small"])],
-                         ["",_p(counts.get("primary_student_issues",0),styles["body"]),_p(counts.get("supporting_findings",0),styles["body"]),_p(counts.get("reference_validation_notes",0),styles["body"]),_p(counts.get("unsupported_entities",0),styles["body"])]],colWidths=[width*.36,width*.16,width*.16,width*.16,width*.16])
+                         ["",_p(counts.get("primary_student_issues",0),styles["body"]),_p(counts.get("supporting_findings",0),styles["body"]),_p(counts.get("reference_validation_notes",0),styles["body"]),_p(unsupported_count,styles["body"])]],colWidths=[width*.36,width*.16,width*.16,width*.16,width*.16])
     score_table.setStyle(TableStyle([("SPAN",(0,0),(0,1)),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"CENTER"),("BACKGROUND",(0,0),(0,-1),colors.HexColor("#e8f4ed")),("GRID",(0,0),(-1,-1),.4,colors.HexColor("#cbd5d1")),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-    story.extend([score_table, _p("Score breakdown", styles["h1"])])
+    story.extend([score_table, Spacer(1, 3)])
+
+    if unsupported_summary.get("has_unsupported") or unsupported_count > 0:
+        notice_msg = unsupported_summary.get("notice") or (
+            f"Notice: {unsupported_count} unsupported entity record(s) detected. "
+            "Unsupported DXF content was not automatically assessed."
+        )
+        notice_cell = Table([[_p(notice_msg, styles["callout"])]], colWidths=[width])
+        notice_cell.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff9e6")),
+            ("BOX", (0, 0), (-1, -1), .5, colors.HexColor("#d69e2e")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.extend([notice_cell, Spacer(1, 3)])
+
+    story.append(_p("Score breakdown", styles["h1"]))
     breakdown_rows = [[
         _p("Category", styles["small"]),
         _p("Earned / available", styles["small"]),
@@ -476,27 +533,129 @@ def generate_pdf(snapshot: ReviewSnapshot) -> bytes:
         _p(_number(snapshot.score_breakdown.get("total_applied_deduction", 0)), styles["body"]),
     ])
     breakdown = Table(breakdown_rows, colWidths=[width * .48, width * .3, width * .22], repeatRows=1)
-    breakdown.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,colors.HexColor("#d8e0dc")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#edf3f0")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
+    breakdown.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,colors.HexColor("#d8e0dc")),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#edf3f0")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
     placement = "Placement policy: " + ("Translation-tolerant placement" if response.get("normalization_mode")=="translation" else "Strict placement") + f". Completion policy: {response.get('completion_scoring_mode','rule_based').replace('_',' ')}."
-    reviewed_section: list[Flowable] = [_p("Reviewed drawing", styles["h1"]), *_overlay_legend(styles, width), ReviewedDrawingFlowable(snapshot.reviewed_drawing, width, 175)]
-    story.extend([breakdown,_p("Placement and transform decision",styles["h1"]),_p(placement,styles["body"]),_p(_normalization_summary(snapshot),styles["small"]),KeepTogether(reviewed_section),PageBreak(),_p("Finding details",styles["title"]),_p("Findings are grouped by their authoritative role. Supporting and reference findings do not become primary deductions.",styles["subtitle"])])
+    story.extend([
+        breakdown,
+        _p("Placement and transform decision", styles["h1"]),
+        _p(placement, styles["body"]),
+        _p(_normalization_summary(snapshot), styles["small"]),
+        PageBreak(),
+    ])
+
+    # --- PAGE 2: Dedicated Drawing Page ---
+    story.extend([
+        _p("Reviewed drawing", styles["h1"]),
+        ReviewedDrawingFlowable(snapshot.reviewed_drawing, width, 480),
+        Spacer(1, 4),
+        *_overlay_legend(styles, width),
+        PageBreak(),
+    ])
+
+    # --- PAGES 3+: Primary Feedback Pages ---
+    story.extend([
+        _p("Finding details", styles["title"]),
+        _p("Primary actionable findings and correction guidance. Supporting evidence is linked under primary findings.", styles["subtitle"]),
+    ])
     story.extend(_finding_summary_story(response, styles, width))
-    issues = list(response.get("issues") or [])
-    presentation = response.get("finding_presentation") or {}
-    if presentation.get("compacted"):
-        displayed_ids = set(presentation.get("displayed_issue_ids") or [])
-        issues = [issue for issue in issues if issue.get("issue_id") in displayed_ids]
-    for role, heading in (("primary","Primary issue details"),("supporting","Supporting topology findings"),("reference","Reference notes"),("unsupported","Unsupported findings"),("informational","Informational findings")):
-        selected = [issue for issue in issues if issue.get("finding_role")==role]
-        if not selected and role != "primary": continue
-        story.append(_p(heading,styles["h1"]))
-        if not selected: story.append(_p("No student issues detected.",styles["body"]))
-        for issue in selected:
+
+    all_issues = list(response.get("issues") or [])
+    issue_by_id = {issue["issue_id"]: issue for issue in all_issues}
+
+    displayed_ids = set(presentation.get("displayed_issue_ids") or [issue["issue_id"] for issue in all_issues])
+    issues = [issue for issue in all_issues if issue.get("issue_id") in displayed_ids]
+
+    primary_issues = [issue for issue in issues if issue.get("finding_role") == "primary"]
+    linked_map = presentation.get("linked_supporting_by_primary") or {}
+
+    story.append(_p("Primary issue details", styles["h1"]))
+    if not primary_issues:
+        story.append(_p("No student issues detected.", styles["body"]))
+    else:
+        for issue in primary_issues:
+            linked_ids = linked_map.get(issue["issue_id"]) or []
+            linked_supporting = [issue_by_id[lid] for lid in linked_ids if lid in issue_by_id]
+            story.append(KeepTogether(_issue_story(issue, styles, width, linked_supporting=linked_supporting)))
+
+    # Unlinked supporting findings
+    unlinked_ids = set(presentation.get("unlinked_supporting_ids") or [])
+    unlinked_supporting = [issue for issue in issues if issue.get("issue_id") in unlinked_ids]
+    if unlinked_supporting:
+        story.append(_p("Unlinked supporting findings", styles["h1"]))
+        for issue in unlinked_supporting:
             story.append(KeepTogether(_issue_story(issue, styles, width)))
-    unsupported = response.get("unsupported_entities") or {}; records = list(unsupported.get("reference") or [])+list(unsupported.get("student") or [])
-    if records:
-        story.append(_p("Unsupported entity records",styles["h1"]))
-        for record in records: story.append(_p(f"{record.get('source','drawing').title()}: {record.get('entity_type','unknown')} - handle {record.get('handle','not available')} - layer {record.get('layer','not available')}",styles["body"]))
+
+    # Reference notes
+    ref_notes = [issue for issue in issues if issue.get("finding_role") == "reference"]
+    if ref_notes:
+        story.append(_p("Reference notes", styles["h1"]))
+        for issue in ref_notes:
+            story.append(KeepTogether(_issue_story(issue, styles, width)))
+
+    # Actionable unsupported findings (score-affecting or critical)
+    actionable_unsupported = [
+        issue for issue in issues
+        if issue.get("finding_role") == "unsupported" and (
+            float(issue.get("final_applied_contribution") or 0.0) > 0 or issue.get("severity") == "critical"
+        )
+    ]
+    if actionable_unsupported:
+        story.append(_p("Actionable unsupported findings", styles["h1"]))
+        for issue in actionable_unsupported:
+            story.append(KeepTogether(_issue_story(issue, styles, width)))
+
+    # --- OPTIONAL TECHNICAL APPENDIX ---
+    if include_appendix:
+        story.append(PageBreak())
+        story.append(_p("Technical Appendix", styles["title"]))
+        story.append(_p("Comprehensive diagnostic evidence, all supporting topology findings, and complete unsupported entity records.", styles["subtitle"]))
+
+        all_supporting = [issue for issue in all_issues if issue.get("finding_role") == "supporting"]
+        if all_supporting:
+            story.append(_p("All supporting topology findings", styles["h1"]))
+            for issue in all_supporting:
+                story.append(KeepTogether(_issue_story(issue, styles, width)))
+
+        unsupported = response.get("unsupported_entities") or {}
+        records = list(unsupported.get("reference") or []) + list(unsupported.get("student") or [])
+        if records:
+            story.append(_p("Unsupported entity records", styles["h1"]))
+            groups = unsupported_summary.get("groups") or []
+            if groups:
+                summary_rows = [[
+                    _p("Source", styles["small"]),
+                    _p("Entity type", styles["small"]),
+                    _p("Count", styles["small"]),
+                    _p("Layers", styles["small"]),
+                    _p("Sample handles", styles["small"]),
+                ]]
+                for grp in groups:
+                    summary_rows.append([
+                        _p(grp["source"].title(), styles["body"]),
+                        _p(grp["entity_type"], styles["body"]),
+                        _p(str(grp["count"]), styles["body"]),
+                        _p(", ".join(grp.get("layers", [])) or "None", styles["body"]),
+                        _p(", ".join(grp.get("sample_handles", [])) or "None", styles["body"]),
+                    ])
+                grp_table = Table(summary_rows, colWidths=[width * .15, width * .2, width * .1, width * .25, width * .3], repeatRows=1)
+                grp_table.setStyle(TableStyle([
+                    ("GRID", (0, 0), (-1, -1), .35, colors.HexColor("#cbd5d1")),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#edf3f0")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]))
+                story.extend([grp_table, Spacer(1, 4)])
+
+            for record in records:
+                story.append(_p(
+                    f"{record.get('source', 'drawing').title()}: {record.get('entity_type', 'unknown')} - "
+                    f"handle {record.get('handle', 'not available')} - layer {record.get('layer', 'not available')}",
+                    styles["body"],
+                ))
+
     def footer(pdf: canvas.Canvas, doc: SimpleDocTemplate) -> None:
         pdf.saveState(); pdf.setStrokeColor(colors.HexColor("#d8e0dc")); pdf.line(document.leftMargin,11*mm,A4[0]-document.rightMargin,11*mm)
         pdf.setFillColor(colors.HexColor("#51615a")); pdf.setFont(FONT_NAME,7); pdf.drawString(document.leftMargin,7.5*mm,f"DraftLens EDU - Report {snapshot.review_id[:12]}"); pdf.drawRightString(A4[0]-document.rightMargin,7.5*mm,f"Page {doc.page}"); pdf.restoreState()

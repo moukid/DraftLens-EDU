@@ -429,11 +429,12 @@ def _normalized_page_text(page):
 
 
 def _assert_full_pdf_legend(reader):
-    page_one = _normalized_page_text(reader.pages[0])
-    assert LEGEND_TITLE in page_one
-    assert LEGEND_NOTE in page_one
-    assert page_one.index("Reviewed drawing") < page_one.index(LEGEND_TITLE)
-    legend = page_one[page_one.index(LEGEND_TITLE):page_one.index(LEGEND_NOTE) + len(LEGEND_NOTE)]
+    drawing_page = next((page for page in reader.pages if LEGEND_TITLE in (page.extract_text() or "")), reader.pages[0])
+    page_text = _normalized_page_text(drawing_page)
+    assert LEGEND_TITLE in page_text
+    assert LEGEND_NOTE in page_text
+    assert page_text.index("Reviewed drawing") < page_text.index(LEGEND_TITLE)
+    legend = page_text[page_text.index(LEGEND_TITLE):page_text.index(LEGEND_NOTE) + len(LEGEND_NOTE)]
     positions = []
     for label, explanation in LEGEND_EXPLANATIONS.items():
         assert legend.count(label) == 1
@@ -451,13 +452,13 @@ def _assert_full_pdf_legend(reader):
 @pytest.mark.parametrize(
     "reference,student,mode,score,primary,page_count,normalization_text",
     (
-        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-Student-OK.dxf", "strict", 100, 0, 2, "Strict placement. No transform is permitted or applied."),
-        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-TwoOnly-Moved.dxf", "strict", 94, 2, 2, "Strict placement. No transform is permitted or applied."),
-        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "strict", 91, 3, 3, "Strict placement. No transform is permitted or applied."),
-        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "translation", 100, 0, 2, "transform accepted"),
-        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Student-OK.dxf", "strict", 100, 0, 2, "Strict placement. No transform is permitted or applied."),
-        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Gap-3Unit.dxf", "strict", 97, 1, 2, "Strict placement. No transform is permitted or applied."),
-        (SAMPLES / "reference.dxf", SAMPLES / "student_door_window_errors.dxf", "strict", 88, 4, 3, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-Student-OK.dxf", "strict", 100, 0, 3, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-TwoOnly-Moved.dxf", "strict", 94, 2, 3, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "strict", 91, 3, 4, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "01-ARC-Reference.dxf", AUDIT_II / "01-ARC-All-Moved.dxf", "translation", 100, 0, 3, "transform accepted"),
+        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Student-OK.dxf", "strict", 100, 0, 3, "Strict placement. No transform is permitted or applied."),
+        (AUDIT_II / "02-SQUARE-Reference.dxf", AUDIT_II / "02-SQUARE-Gap-3Unit.dxf", "strict", 97, 1, 3, "Strict placement. No transform is permitted or applied."),
+        (SAMPLES / "reference.dxf", SAMPLES / "student_door_window_errors.dxf", "strict", 88, 4, 4, "Strict placement. No transform is permitted or applied."),
     ),
 )
 def test_full_overlay_legend_is_unconditional_and_preserves_controlled_reports(
@@ -494,7 +495,7 @@ def test_reference_note_report_contains_the_same_complete_legend():
     ).json()
     assert review["finding_counts"]["reference_validation_notes"] == 1
     reader = _reader(_pdf(review))
-    assert len(reader.pages) == 2
+    assert len(reader.pages) == 3
     _assert_full_pdf_legend(reader)
 
 
@@ -525,7 +526,7 @@ def test_score_93_presentation_snapshot_has_complete_deterministic_vector_legend
     second = generate_pdf(combined_snapshot)
     assert first == second
     reader = PdfReader(io.BytesIO(first))
-    assert len(reader.pages) == 3
+    assert len(reader.pages) == 4
     report_text = _text(reader)
     assert "93 / 100" in report_text
     assert all(issue["issue_id"] in report_text for issue in review["issues"])

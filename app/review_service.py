@@ -323,7 +323,11 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         output.validation,
     )
     issues = _issue_payload(reviewed)
-    presentation = compact_finding_presentation(issues)
+    unsupported_payload = {
+        "reference": reviewed.reference_unsupported,
+        "student": reviewed.student_unsupported,
+    }
+    presentation = compact_finding_presentation(issues, unsupported_entities=unsupported_payload)
     finding_counts = _finding_counts(issues, reviewed)
     compatibility = output.compatibility.to_dict()
     scale_diagnostic = output.scale_diagnostic.to_dict()
