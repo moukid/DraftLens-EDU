@@ -113,7 +113,7 @@ def test_ui_assets_are_served_from_fastapi_static_mount():
 
 def test_page_has_no_external_or_cdn_dependencies():
     response, parser = page()
-    assert parser.assets == ["/static/style.css?v=0.2.1", "data:,", "/static/app.js?v=0.2.1"]
+    assert parser.assets == ["/static/style.css?v=review-usability-2", "data:,", "/static/app.js?v=review-usability-2"]
     lowered = response.text.lower()
     assert "http://" not in lowered
     assert "https://" not in lowered
@@ -130,8 +130,8 @@ def test_static_assets_share_a_deterministic_release_version():
         for asset in static_assets
     }
 
-    assert static_assets == ["/static/style.css?v=0.2.1", "/static/app.js?v=0.2.1"]
-    assert versions == {"0.2.1"}
+    assert static_assets == ["/static/style.css?v=review-usability-2", "/static/app.js?v=review-usability-2"]
+    assert versions == {"review-usability-2"}
     assert repeated.assets == first.assets
     assert all(client.get(asset).status_code == 200 for asset in static_assets)
 
@@ -388,7 +388,9 @@ def test_optional_metadata_and_authoritative_pdf_download_are_wired():
     assert "state.review.review_id" in javascript
     assert "state.review.report_available" in javascript
     assert 'encodeURIComponent(state.review.review_id)' in javascript
-    assert 'window.location.assign("/api/reviews/" + reviewId + "/report.pdf")' in javascript
+    assert 'fetch("/api/reviews/" + reviewId + "/report.pdf"' in javascript
+    assert 'URL.createObjectURL(blob)' in javascript
+    assert 'PDF export failed. Your review is still available.' in javascript
 
     listener_start = javascript.index('metadataInputs.forEach((input) => input.addEventListener("input"')
     listener_end = javascript.index('completionPolicyInput.addEventListener', listener_start)

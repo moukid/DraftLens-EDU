@@ -21,6 +21,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import CondPageBreak, Flowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .review_snapshot import ReviewSnapshot
+from .finding_presentation import compact_finding_presentation, essential_finding
 from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue
 from .svg_renderer import CoordinateTransform
 
@@ -354,6 +355,7 @@ def _issue_story(
     styles: dict[str, ParagraphStyle],
     width: float,
     linked_supporting: list[dict[str, Any]] | None = None,
+    compact: bool = False,
 ) -> list[Flowable]:
     expected, actual, deviation = _measurement(issue); guidance = issue.get("correction_guidance") or {}
     title = str(issue.get("category") or "finding").replace("_"," ").title()
@@ -364,9 +366,18 @@ def _issue_story(
             ("Score category",issue.get("score_category") or "Not scored","Raw deduction",_number(issue.get("raw_rule_deduction",0))),
             ("Applied deduction",_number(issue.get("final_applied_contribution",0)),"Caps",f"rule {_number(issue.get('deduction_after_rule_cap',0))} / category {_number(issue.get('deduction_after_category_cap',0))}; {issue.get('cap_reason') or issue.get('deduction_status')}")]
     output: list[Flowable] = [CondPageBreak(55), _p(f"{issue.get('issue_id','Issue')} - {title}", styles["h2"]), _four_column_table(rows, styles, width), Spacer(1,3), _p(issue.get("technical_feedback") or "Review this finding.", styles["body"])]
+    if compact:
+        output = [CondPageBreak(55), _p(f"{issue.get('issue_id','Issue')} - {title}", styles["h2"]),
+                  _p(f"{issue.get('severity')} | Expected {issue.get('expected_entity_id') or '-'} / student {issue.get('source_entity_id') or '-'} | Applied {_number(issue.get('final_applied_contribution', 0))} | {issue.get('deduction_status') or 'not scored'}", styles["small"]),
+                  _p(issue.get("technical_feedback") or "Review this finding.", styles["body"])]
     if issue.get("suppression_reason"): output.append(_p(f"Suppression reason: {issue['suppression_reason']}", styles["small"]))
+    related_primary = guidance.get("related_primary_issue_id") or (issue.get("measurement") or {}).get("linked_primary_issue_id")
+    if related_primary and issue.get("finding_role") == "supporting":
+        output.append(_p(f"Supporting evidence for primary issue: {related_primary}", styles["small"]))
     primary_command = guidance.get("primary_command") if issue.get("finding_role") == "primary" else None
-    if primary_command:
+    if primary_command and compact:
+        output.append(_p(f"Correction: {primary_command}. {guidance.get('explanation') or ''}", styles["small"]))
+    if primary_command and not compact:
         alternatives = ", ".join(guidance.get("alternative_commands") or []) or "None"
         precision_aids = ", ".join(guidance.get("precision_aids") or []) or "None"
         correction = Table(
@@ -377,7 +388,7 @@ def _issue_story(
                 [_p("Explanation", styles["small"]), _p(guidance.get("explanation") or "Not provided", styles["callout"])],
             ],
             colWidths=[width * .2, width * .8],
-            splitByRow=0,
+            splitByRow=1, splitInRow=1,
         )
         correction.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#eff8f3")),
@@ -403,7 +414,8 @@ def _issue_story(
                 _p(sup_title, styles["body"]),
                 _p(sup.get("technical_feedback") or "Supporting topology evidence", styles["body"]),
             ])
-        sup_table = Table(sup_rows, colWidths=[width * .25, width * .25, width * .5], splitByRow=0)
+        sup_table = Table(sup_rows, colWidths=[width * .25, width * .25, width * .5],
+                          repeatRows=1, splitByRow=1, splitInRow=1)
         sup_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fbf4f9")),
             ("BOX", (0, 0), (-1, -1), .5, colors.HexColor("#d53f8c")),
@@ -460,8 +472,9 @@ def _finding_summary_story(
     ]))
     totals = (
         f"{presentation.get('total_raw_count', 0)} primary findings; "
-        f"{presentation.get('total_displayed_count', 0)} displayed; "
-        f"{presentation.get('total_summarized_count', 0)} summarized."
+        f"{presentation.get('total_displayed_count', 0)} representatives; "
+        f"{presentation.get('total_summarized_count', 0)} additional summarized findings. "
+        "All primary findings, including capped findings, are retained below."
     )
     return [_p("Compact finding summary", styles["h1"]), _p(totals, styles["body"]), table, Spacer(1, 5)]
 
@@ -471,8 +484,11 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
     """Generate a deterministic authoritative report without invoking grading."""
     styles, output = _styles(), BytesIO()
     document = SimpleDocTemplate(output,pagesize=A4,leftMargin=16*mm,rightMargin=16*mm,topMargin=15*mm,bottomMargin=16*mm,title="DraftLens EDU Drawing Assessment Report",author="DraftLens EDU",subject=f"Authoritative review {snapshot.review_id}")
-    width = A4[0]-document.leftMargin-document.rightMargin; response = snapshot.review_response; counts = response.get("finding_counts") or {}; score = response.get("score",0)
-    presentation = response.get("finding_presentation") or {}
+    # SimpleDocTemplate's frame has 6pt padding on each side, inside the margins.
+    width = A4[0]-document.leftMargin-document.rightMargin - 12; response = snapshot.review_response; counts = response.get("finding_counts") or {}; score = response.get("score",0)
+    presentation = compact_finding_presentation(
+        list(response.get("issues") or []), response.get("unsupported_entities")
+    )
     unsupported_summary = presentation.get("unsupported_summary") or {}
     unsupported_count = counts.get("unsupported_entities", 0)
 
@@ -562,10 +578,13 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
     all_issues = list(response.get("issues") or [])
     issue_by_id = {issue["issue_id"]: issue for issue in all_issues}
 
-    displayed_ids = set(presentation.get("displayed_issue_ids") or [issue["issue_id"] for issue in all_issues])
+    displayed_ids = set(presentation["default_issue_ids"])
     issues = [issue for issue in all_issues if issue.get("issue_id") in displayed_ids]
 
     primary_issues = [issue for issue in issues if issue.get("finding_role") == "primary"]
+    representative_ids = set(presentation["displayed_issue_ids"])
+    summarized_primary = [issue for issue in primary_issues if issue["issue_id"] not in representative_ids]
+    primary_issues = [issue for issue in primary_issues if issue["issue_id"] in representative_ids]
     linked_map = presentation.get("linked_supporting_by_primary") or {}
 
     story.append(_p("Primary issue details", styles["h1"]))
@@ -575,13 +594,38 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
         for issue in primary_issues:
             linked_ids = linked_map.get(issue["issue_id"]) or []
             linked_supporting = [issue_by_id[lid] for lid in linked_ids if lid in issue_by_id]
-            story.append(KeepTogether(_issue_story(issue, styles, width, linked_supporting=linked_supporting)))
+            detail = _issue_story(issue, styles, width, linked_supporting=linked_supporting,
+                                  compact=presentation["compacted"])
+            if linked_supporting:
+                # A multi-page evidence table must not push the heading to an empty page.
+                story.extend(detail)
+            else:
+                story.append(KeepTogether(detail))
 
-    # Unlinked supporting findings
-    unlinked_ids = set(presentation.get("unlinked_supporting_ids") or [])
-    unlinked_supporting = [issue for issue in issues if issue.get("issue_id") in unlinked_ids]
+    if summarized_primary:
+        story.append(_p("Additional actionable findings", styles["h1"]))
+        story.append(_p("These findings still require review and correction. A zero applied deduction, including a cap, does not mean the issue is resolved. Full evidence is available by issue ID in the viewer or technical appendix.", styles["body"]))
+        rows = [[_p(label, styles["small"]) for label in ("Issue ID", "Expected / student entity", "Correction", "Applied / status")]]
+        for issue in summarized_primary:
+            guidance = issue.get("correction_guidance") or {}
+            rows.append([
+                _p(issue["issue_id"], styles["small"]),
+                _p(f"{issue.get('expected_entity_id') or '-'} / {issue.get('source_entity_id') or '-'}", styles["small"]),
+                _p(f"{issue.get('severity', '')} {str(issue.get('category') or 'finding').replace('_', ' ')}: {guidance.get('primary_command') or 'See representative correction guidance'}", styles["small"]),
+                _p(f"{_number(issue.get('final_applied_contribution', 0))} / {issue.get('deduction_status') or 'not scored'}", styles["small"]),
+            ])
+        additional = Table(rows, colWidths=[width * .12, width * .26, width * .44, width * .18], repeatRows=1, splitInRow=1)
+        additional.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("GRID", (0, 0), (-1, -1), .3, colors.HexColor("#cbd5d1")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#edf3f0")),
+        ]))
+        story.append(additional)
+
+    # Essential supporting evidence stays visible even without the appendix.
+    unlinked_supporting = [issue for issue in issues if issue.get("finding_role") == "supporting"]
     if unlinked_supporting:
-        story.append(_p("Unlinked supporting findings", styles["h1"]))
+        story.append(_p("Essential supporting findings", styles["h1"]))
         for issue in unlinked_supporting:
             story.append(KeepTogether(_issue_story(issue, styles, width)))
 
@@ -595,13 +639,17 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
     # Actionable unsupported findings (score-affecting or critical)
     actionable_unsupported = [
         issue for issue in issues
-        if issue.get("finding_role") == "unsupported" and (
-            float(issue.get("final_applied_contribution") or 0.0) > 0 or issue.get("severity") == "critical"
-        )
+        if issue.get("finding_role") == "unsupported" and essential_finding(issue)
     ]
     if actionable_unsupported:
         story.append(_p("Actionable unsupported findings", styles["h1"]))
         for issue in actionable_unsupported:
+            story.append(KeepTogether(_issue_story(issue, styles, width)))
+
+    informational = [issue for issue in issues if issue.get("finding_role") == "informational"]
+    if informational:
+        story.append(_p("Informational findings", styles["h1"]))
+        for issue in informational:
             story.append(KeepTogether(_issue_story(issue, styles, width)))
 
     # --- OPTIONAL TECHNICAL APPENDIX ---
@@ -611,9 +659,21 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
         story.append(_p("Comprehensive diagnostic evidence, all supporting topology findings, and complete unsupported entity records.", styles["subtitle"]))
 
         all_supporting = [issue for issue in all_issues if issue.get("finding_role") == "supporting"]
+        if presentation["compacted"]:
+            story.append(_p("Full evidence for all primary findings", styles["h1"]))
+            for issue in all_issues:
+                if issue.get("finding_role") != "primary":
+                    continue
+                story.append(KeepTogether(_issue_story(issue, styles, width)))
         if all_supporting:
             story.append(_p("All supporting topology findings", styles["h1"]))
             for issue in all_supporting:
+                story.append(KeepTogether(_issue_story(issue, styles, width)))
+
+        unsupported_findings = [issue for issue in all_issues if issue.get("finding_role") == "unsupported"]
+        if unsupported_findings:
+            story.append(_p("Unsupported findings", styles["h1"]))
+            for issue in unsupported_findings:
                 story.append(KeepTogether(_issue_story(issue, styles, width)))
 
         unsupported = response.get("unsupported_entities") or {}
@@ -637,7 +697,7 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
                         _p(", ".join(grp.get("layers", [])) or "None", styles["body"]),
                         _p(", ".join(grp.get("sample_handles", [])) or "None", styles["body"]),
                     ])
-                grp_table = Table(summary_rows, colWidths=[width * .15, width * .2, width * .1, width * .25, width * .3], repeatRows=1)
+                grp_table = Table(summary_rows, colWidths=[width * .15, width * .2, width * .1, width * .25, width * .3], repeatRows=1, splitInRow=1)
                 grp_table.setStyle(TableStyle([
                     ("GRID", (0, 0), (-1, -1), .35, colors.HexColor("#cbd5d1")),
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#edf3f0")),

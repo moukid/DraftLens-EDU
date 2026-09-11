@@ -382,9 +382,7 @@ def test_behavioral_collapsible_supporting_findings_under_primary():
         compacted: true,
         displayed_issue_ids: ['PRIM-01'],
         linked_supporting_by_primary: {
-          'PRIM-01': [
-            { issue_id: 'SUP-01', issue_type: 'endpoint_gap', technical_feedback: 'Endpoint disconnected' }
-          ]
+          'PRIM-01': ['SUP-01']
         },
         unlinked_supporting_ids: []
       }
@@ -404,6 +402,8 @@ def test_behavioral_collapsible_supporting_findings_under_primary():
     assert "PRIM-01" in res["cardText"]
     assert "Action: MOVE" in res["cardText"]
     assert "1 supporting finding(s)" in res["cardText"]
+    assert "SUP-01: Endpoint disconnected from corner" in res["cardText"]
+    assert "undefined" not in res["cardText"]
 
 
 def test_pdf_report_dedicated_drawing_page_and_optional_appendix():

@@ -134,7 +134,8 @@ byId("drawing-viewport").addEventListener("click", (event) => {
   }
   if (state.viewMode === "student") return;
   const visual = event.target.closest("[data-issue-id]");
-  if (visual) selectIssue(visual.getAttribute("data-issue-id"), true);
+  const issueId = visual ? visual.getAttribute("data-issue-id") : viewerNav.pointerIssueId;
+  if (issueId) selectIssue(issueId, true);
 });
 viewReviewButton.addEventListener("click", () => setDrawingViewMode("review"));
 viewStudentButton.addEventListener("click", () => setDrawingViewMode("student"));
@@ -180,12 +181,25 @@ if (typeof window !== "undefined" && window.addEventListener) {
     if (e.key === "Escape" && viewerNav.isExpanded) {
       setExpandedView(false);
     }
+    if (e.key === "Tab" && viewerNav.isExpanded) {
+      const panel = document.querySelector(".drawing-panel");
+      const controls = Array.from(panel.querySelectorAll('button:not(:disabled), summary, [tabindex="0"]'))
+        .filter((el) => el.getClientRects().length > 0);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
   });
 }
 
 const drawingViewportEl = byId("drawing-viewport");
 drawingViewportEl.addEventListener("pointerdown", (e) => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || viewerNav.isDragging || !getViewportSvg()) return;
+  const visual = e.target && e.target.closest("[data-issue-id]");
+  viewerNav.pointerIssueId = visual ? visual.getAttribute("data-issue-id") : null;
+  const matrix = getViewportSvg().getScreenCTM && getViewportSvg().getScreenCTM();
+  viewerNav.dragMatrix = matrix ? matrix.inverse() : null;
+  viewerNav.pointerId = e.pointerId;
   viewerNav.isDragging = true;
   viewerNav.startX = e.clientX;
   viewerNav.startY = e.clientY;
@@ -199,7 +213,7 @@ drawingViewportEl.addEventListener("pointerdown", (e) => {
 });
 
 drawingViewportEl.addEventListener("pointermove", (e) => {
-  if (!viewerNav.isDragging) return;
+  if (!viewerNav.isDragging || e.pointerId !== viewerNav.pointerId) return;
   const dx = e.clientX - viewerNav.startX;
   const dy = e.clientY - viewerNav.startY;
   const dist = Math.hypot(dx, dy);
@@ -208,36 +222,41 @@ drawingViewportEl.addEventListener("pointermove", (e) => {
     viewerNav.justDragged = true;
     drawingViewportEl.classList.add("is-panning");
   }
-  const svg = drawingViewportEl.querySelector("svg");
-  let rectWidth = 800;
-  let rectHeight = 600;
-  if (svg && typeof svg.getBoundingClientRect === "function") {
-    const rect = svg.getBoundingClientRect();
-    if (rect.width > 0) rectWidth = rect.width;
-    if (rect.height > 0) rectHeight = rect.height;
-  }
-  const scaleX = viewerNav.currentWidth / rectWidth;
-  const scaleY = viewerNav.currentHeight / rectHeight;
-  viewerNav.currentX = viewerNav.startViewX - dx * scaleX;
-  viewerNav.currentY = viewerNav.startViewY - dy * scaleY;
+  if (!viewerNav.justDragged) return;
+  // The inverse screen matrix accounts for preserveAspectRatio letterboxing.
+  const m = viewerNav.dragMatrix;
+  if (!m) return;
+  viewerNav.currentX = viewerNav.startViewX - (dx * m.a + dy * m.c);
+  viewerNav.currentY = viewerNav.startViewY - (dx * m.b + dy * m.d);
   applyViewBox();
 });
 
 const endViewportDrag = (e) => {
-  if (!viewerNav.isDragging) return;
+  if (!viewerNav.isDragging || e.pointerId !== viewerNav.pointerId) return;
   viewerNav.isDragging = false;
   if (typeof drawingViewportEl.releasePointerCapture === "function" && e.pointerId) {
     try { drawingViewportEl.releasePointerCapture(e.pointerId); } catch (_) {}
   }
   drawingViewportEl.classList.remove("is-panning");
-  if (viewerNav.totalDragDistance > 5) {
-    setTimeout(() => { viewerNav.justDragged = false; }, 60);
-  } else {
-    viewerNav.justDragged = false;
-  }
+  // Keep suppression until the generated click (or next pointerdown), not a timer.
 };
 drawingViewportEl.addEventListener("pointerup", endViewportDrag);
 drawingViewportEl.addEventListener("pointercancel", endViewportDrag);
+drawingViewportEl.addEventListener("lostpointercapture", endViewportDrag);
+
+drawingViewportEl.addEventListener("keydown", (e) => {
+  if (["+", "=", "-", "0", "Home", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+    e.preventDefault();
+    if (e.key === "+" || e.key === "=") zoomViewer(1.25);
+    else if (e.key === "-") zoomViewer(0.8);
+    else if (e.key === "0" || e.key === "Home") resetViewerNav();
+    else {
+      viewerNav.currentX += (e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0) * viewerNav.currentWidth * .1;
+      viewerNav.currentY += (e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0) * viewerNav.currentHeight * .1;
+      applyViewBox();
+    }
+  }
+});
 
 drawingViewportEl.addEventListener("wheel", (e) => {
   if (typeof e.preventDefault === "function") e.preventDefault();
@@ -346,6 +365,12 @@ function resetReview() {
   const unsupportedNotice = byId("unsupported-notice");
   if (unsupportedNotice) unsupportedNotice.hidden = true;
   resetViewerNav();
+  viewerNav.isDragging = false;
+  viewerNav.justDragged = false;
+  viewerNav.pointerIssueId = null;
+  setExpandedView(false);
+  showTechnicalDetails = false;
+  if (toggleTechnicalDetailsCheckbox) toggleTechnicalDetailsCheckbox.checked = false;
 
   resetIssueSelection("Select an issue in the list or drawing.");
   byId("review-results").hidden = true;
@@ -753,6 +778,7 @@ function markRubricDirty() {
     state.provisionalRubric.rubric_modified_by_instructor = true;
   }
   byId("rubric-status").textContent = "Changes require instructor approval.";
+  updateSetupSummary();
   updateWeightTotal();
   updateReviewAvailability();
 }
@@ -778,6 +804,7 @@ async function approveRubric() {
     byId("rubric-status").textContent = "Approved and associated. Assignment type: " + state.provisionalRubric.assignment_type + ". Placement: " + placementModeLabel(state.provisionalRubric.normalization_mode) + ". Completion policy: " + completionPolicyLabel(state.provisionalRubric.completion_scoring_mode) + ".";
     setWorkflowStatus("Rubric approved — add student drawing", "success");
     updateSetupSummary();
+    setSetupCollapsed(true);
   } catch (error) {
     showError(error);
   } finally {
@@ -811,25 +838,51 @@ function updateReviewAvailability() {
 
 function updateReportAvailability() {
   const available = Boolean(state.review && state.review.review_id && state.review.report_available);
-  downloadReportButton.disabled = state.loading || !available;
-  if (downloadReportHeaderButton) downloadReportHeaderButton.disabled = state.loading || !available;
+  downloadReportButton.disabled = state.loading || state.reportLoading || !available;
+  if (downloadReportHeaderButton) downloadReportHeaderButton.disabled = state.loading || state.reportLoading || !available;
   if (available) byId("report-status").textContent = "Authoritative PDF report ready.";
   else if (state.review && state.review.grading_status === "withheld") {
     byId("report-status").textContent = "PDF report unavailable while grading is withheld.";
   }
 }
 
-function downloadReport() {
-  if (!state.review || !state.review.review_id || !state.review.report_available) return;
+async function downloadReport() {
+  if (state.loading || state.reportLoading || !state.review || !state.review.review_id || !state.review.report_available) return;
   const reviewId = encodeURIComponent(state.review.review_id);
   const includeAppendix = Boolean(
     (includeAppendixHeaderCheckbox && includeAppendixHeaderCheckbox.checked) ||
     (includeAppendixCheckbox && includeAppendixCheckbox.checked)
   );
-  if (includeAppendix) {
-    window.location.assign("/api/reviews/" + reviewId + "/report.pdf?include_appendix=true");
-  } else {
-    window.location.assign("/api/reviews/" + reviewId + "/report.pdf");
+  state.reportLoading = true;
+  updateReportAvailability();
+  hideError();
+  byId("report-status").textContent = "Preparing PDF report...";
+  try {
+    const response = await fetch("/api/reviews/" + reviewId + "/report.pdf" + (includeAppendix ? "?include_appendix=true" : ""));
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || "PDF export failed. Please try again.");
+    }
+    const blob = await response.blob();
+    const location = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = location;
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const filename = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    link.download = filename ? decodeURIComponent(filename[1]) : "DraftLens_Report.pdf";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(location), 1000);
+    byId("report-status").textContent = "PDF report downloaded.";
+  } catch (error) {
+    showError(error);
+    byId("report-status").textContent = "PDF export failed. Your review is still available.";
+  } finally {
+    state.reportLoading = false;
+    const available = Boolean(state.review && state.review.report_available);
+    downloadReportButton.disabled = state.loading || !available;
+    if (downloadReportHeaderButton) downloadReportHeaderButton.disabled = state.loading || !available;
   }
 }
 
@@ -1024,9 +1077,17 @@ function findingCounts(review) {
 
 function presentedIssues(review) {
   const presentation = review.finding_presentation || {};
-  if (!presentation.compacted) return review.issues || [];
-  const displayed = new Set(presentation.displayed_issue_ids || []);
-  return (review.issues || []).filter((issue) => displayed.has(issue.issue_id));
+  if (showTechnicalDetails) return review.issues || [];
+  if (presentation.default_issue_ids) {
+    const displayed = new Set(presentation.default_issue_ids);
+    return (review.issues || []).filter((issue) => displayed.has(issue.issue_id));
+  }
+  return (review.issues || []).filter((issue) =>
+    !["supporting", "unsupported"].includes(findingRole(issue)) || essentialFinding(issue));
+}
+
+function essentialFinding(issue) {
+  return issue.severity === "critical" || issue.blocks_reference || issue.blocking || appliedDeduction(issue) > 0;
 }
 
 function renderFindingSummary(review) {
@@ -1040,8 +1101,8 @@ function renderFindingSummary(review) {
   }
   byId("finding-summary-totals").textContent =
     String(presentation.total_raw_count || 0) + " primary findings / " +
-    String(presentation.total_displayed_count || 0) + " displayed / " +
-    String(presentation.total_summarized_count || 0) + " summarized.";
+    String(presentation.total_displayed_count || 0) + " representatives / " +
+    String(presentation.total_summarized_count || 0) + " additional summarized findings. All primary findings, including capped findings, remain listed.";
   (presentation.summary_groups || []).forEach((group) => {
     const row = document.createElement("div");
     row.className = "finding-summary-row";
@@ -1221,12 +1282,15 @@ function zoomViewer(factor, clientX, clientY) {
 
   let normX = 0.5;
   let normY = 0.5;
-  if (clientX !== undefined && clientY !== undefined && typeof svg.getBoundingClientRect === "function") {
-    const rect = svg.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-    }
+  if (clientX !== undefined && clientY !== undefined && svg.getScreenCTM && svg.createSVGPoint) {
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return;
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const anchor = point.matrixTransform(matrix.inverse());
+    normX = (anchor.x - viewerNav.currentX) / viewerNav.currentWidth;
+    normY = (anchor.y - viewerNav.currentY) / viewerNav.currentHeight;
   }
 
   const targetSvgX = viewerNav.currentX + normX * viewerNav.currentWidth;
@@ -1258,7 +1322,7 @@ function locateIssueInViewer(issueId) {
       bbox = element.getBBox();
     } catch (_) {}
   }
-  if (!bbox || bbox.width <= 0 || bbox.height <= 0) {
+  if (!bbox || ![bbox.x, bbox.y, bbox.width, bbox.height].every(Number.isFinite)) {
     return;
   }
 
@@ -1268,23 +1332,37 @@ function locateIssueInViewer(issueId) {
   const cx = bbox.x + bbox.width / 2;
   const cy = bbox.y + bbox.height / 2;
 
-  viewerNav.currentWidth = targetWidth;
-  viewerNav.currentHeight = targetHeight;
-  viewerNav.currentX = cx - targetWidth / 2;
-  viewerNav.currentY = cy - targetHeight / 2;
-  viewerNav.scale = Math.min(Math.max(viewerNav.baseWidth / targetWidth, viewerNav.minScale), viewerNav.maxScale);
+  viewerNav.scale = Math.min(Math.max(Math.min(viewerNav.baseWidth / targetWidth, viewerNav.baseHeight / targetHeight), viewerNav.minScale), viewerNav.maxScale);
+  viewerNav.currentWidth = viewerNav.baseWidth / viewerNav.scale;
+  viewerNav.currentHeight = viewerNav.baseHeight / viewerNav.scale;
+  viewerNav.currentX = cx - viewerNav.currentWidth / 2;
+  viewerNav.currentY = cy - viewerNav.currentHeight / 2;
   applyViewBox();
 }
 
 function setExpandedView(expanded) {
+  const wasExpanded = viewerNav.isExpanded;
   viewerNav.isExpanded = Boolean(expanded);
   const drawingPanel = document.querySelector(".drawing-panel");
   if (drawingPanel) {
     drawingPanel.classList.toggle("is-expanded", viewerNav.isExpanded);
+    if (viewerNav.isExpanded) {
+      drawingPanel.setAttribute("role", "dialog");
+      drawingPanel.setAttribute("aria-modal", "true");
+    } else {
+      drawingPanel.removeAttribute("role");
+      drawingPanel.removeAttribute("aria-modal");
+    }
   }
   document.body.classList.toggle("viewer-is-expanded", viewerNav.isExpanded);
   if (viewerExpandButton) viewerExpandButton.hidden = viewerNav.isExpanded;
   if (viewerExitExpandButton) viewerExitExpandButton.hidden = !viewerNav.isExpanded;
+  if (viewerNav.isExpanded && !wasExpanded) {
+    viewerNav.returnFocus = document.activeElement;
+    if (drawingViewportEl.focus) drawingViewportEl.focus({preventScroll: true});
+  } else if (wasExpanded && viewerNav.returnFocus && viewerNav.returnFocus.focus) {
+    viewerNav.returnFocus.focus({preventScroll: true});
+  }
 }
 
 function updateSetupSummary() {
@@ -1306,6 +1384,7 @@ function updateSetupSummary() {
   byId("summary-assignment-type").textContent = type;
   byId("summary-placement-policy").textContent = normMode;
   card.hidden = false;
+  byId("setup-summary-heading").textContent = state.rubricId ? "Approved assignment" : "Assignment - approval required";
 }
 
 function setSetupCollapsed(collapsed) {
@@ -1331,7 +1410,7 @@ function renderUnsupportedNotice(review) {
   banner.hidden = false;
   const textEl = byId("unsupported-notice-text");
   if (textEl) {
-    textEl.textContent = summary.notice || `${total} unsupported entities were detected and safely ignored during evaluation. Assessment scope is limited to supported 2D geometry.`;
+    textEl.textContent = summary.notice || `${total} unsupported entities were not automatically assessed. Assessment scope is limited to supported 2D geometry.`;
   }
   const listEl = byId("unsupported-notice-list");
   if (listEl) {
@@ -1364,15 +1443,16 @@ function renderIssueList() {
   }
   const presentation = state.review.finding_presentation || {};
   const linkedSupporting = presentation.linked_supporting_by_primary || {};
-  const unlinkedSupportingIds = new Set(presentation.unlinked_supporting_ids || []);
+  const issueById = new Map((state.review.issues || []).map((issue) => [issue.issue_id, issue]));
 
   const visible = presentedIssues(state.review).filter((issue) => {
     if (state.filter !== "all" && issue.visual_role !== state.filter) return false;
-    if (!showTechnicalDetails && unlinkedSupportingIds.has(issue.issue_id)) return false;
     return true;
   });
   byId("issue-empty").hidden = visible.length !== 0;
   visible.forEach((issue) => {
+    const group = document.createElement("div");
+    group.className = "issue-group";
     const button = document.createElement("button");
     button.type = "button";
     const role = findingRole(issue);
@@ -1421,27 +1501,33 @@ function renderIssueList() {
     button.append(evidence, deductionDetail);
 
     // Linked supporting topology findings collapsible
-    const linked = linkedSupporting[issue.issue_id] || [];
+    group.append(button);
+    const linked = (linkedSupporting[issue.issue_id] || []).map((id) => issueById.get(id)).filter(Boolean);
     if (linked.length > 0) {
       const collapse = document.createElement("details");
       collapse.className = "supporting-findings-collapse";
       const summary = document.createElement("summary");
-      summary.textContent = `${linked.length} supporting finding(s) (no extra deduction)`;
+      summary.textContent = `${linked.length} supporting finding(s) - linked evidence`;
+      collapse.open = linked.some((sup) => essentialFinding(sup) || sup.issue_id === state.selectedIssueId);
       collapse.append(summary);
       const sublist = document.createElement("ul");
       sublist.className = "supporting-findings-sublist";
       linked.forEach((sup) => {
         const item = document.createElement("li");
-        item.textContent = `${sup.issue_id}: ${sup.technical_feedback || humanize(sup.issue_type)}`;
+        const link = document.createElement("button");
+        link.type = "button";
+        link.textContent = `${sup.issue_id}: ${sup.technical_feedback || humanize(sup.category)}`;
+        link.addEventListener("click", () => selectIssue(sup.issue_id, false));
+        item.append(link);
         sublist.append(item);
       });
       collapse.append(sublist);
       collapse.addEventListener("click", (e) => e.stopPropagation());
-      button.append(collapse);
+      group.append(collapse);
     }
 
     button.addEventListener("click", () => selectIssue(issue.issue_id, true));
-    list.append(button);
+    list.append(group);
   });
 }
 

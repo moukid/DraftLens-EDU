@@ -220,7 +220,7 @@ def download_pdf_report(
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": content_disposition(snapshot)},
+        headers={"Content-Disposition": content_disposition(snapshot), "Cache-Control": "no-store"},
     )
 @app.post("/api/reference/validate")
 async def reference_validate(reference: UploadFile = File(...)):

@@ -9,6 +9,15 @@ ZERO_CONTRIBUTION_REPRESENTATIVES = 3
 SYSTEMATIC_CATEGORIES = {"global_drawing_displacement"}
 
 
+def essential_finding(issue: dict[str, Any]) -> bool:
+    """Presentation only: never conceal blocking, critical or scored evidence."""
+    return (
+        issue.get("severity") == "critical"
+        or bool(issue.get("blocks_reference") or issue.get("blocking"))
+        or float(issue.get("final_applied_contribution") or 0.0) > 0
+    )
+
+
 def summarize_unsupported_entities(
     unsupported: dict[str, list[dict[str, Any]]] | None,
 ) -> dict[str, Any]:
@@ -95,6 +104,12 @@ def compact_finding_presentation(
 
     # Build unsupported summary
     unsupported_summary = summarize_unsupported_entities(unsupported_entities)
+    # Compaction is a summary, not permission to remove actionable capped issues.
+    default_issue_ids = [
+        issue["issue_id"] for issue in issues
+        if issue.get("finding_role") not in {"supporting", "unsupported"}
+        or essential_finding(issue)
+    ]
 
     if not is_compacted:
         displayed_ids = [issue["issue_id"] for issue in issues]
@@ -106,6 +121,7 @@ def compact_finding_presentation(
             "displayed_issue_ids": displayed_ids,
             "summary_groups": [],
             "primary_issue_ids": [issue["issue_id"] for issue in primary],
+            "default_issue_ids": default_issue_ids,
             "linked_supporting_by_primary": dict(linked_supporting_by_primary),
             "unlinked_supporting_ids": unlinked_supporting_ids,
             "unsupported_summary": unsupported_summary,
@@ -158,7 +174,7 @@ def compact_finding_presentation(
         )
         if issue.get("finding_role") in {"reference", "unsupported", "informational"}:
             displayed.add(issue["issue_id"])
-        elif linked in linked_primary_ids:
+        elif linked in linked_primary_ids or essential_finding(issue):
             displayed.add(issue["issue_id"])
 
     grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
@@ -257,6 +273,7 @@ def compact_finding_presentation(
         ],
         "summary_groups": summaries,
         "primary_issue_ids": [issue["issue_id"] for issue in primary],
+        "default_issue_ids": default_issue_ids,
         "linked_supporting_by_primary": dict(linked_supporting_by_primary),
         "unlinked_supporting_ids": unlinked_supporting_ids,
         "unsupported_summary": unsupported_summary,

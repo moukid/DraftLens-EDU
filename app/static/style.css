@@ -423,7 +423,7 @@ fieldset legend { padding: 0 4px; }
 .results-bar {
   padding: 15px 18px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(400px, 1.25fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   align-items: center;
 }
@@ -834,7 +834,7 @@ footer {
   background: var(--surface-muted);
   border-color: var(--ink);
 }
-.setup-column.is-collapsed > .panel:not(#setup-summary) {
+.setup-column.is-collapsed > .panel:not(#setup-summary):not([aria-labelledby="student-heading"]) {
   display: none !important;
 }
 
@@ -999,7 +999,6 @@ body.viewer-is-expanded {
   cursor: pointer;
   font-weight: 700;
   color: var(--blue);
-  outline: none;
 }
 .supporting-findings-sublist {
   margin: 5px 0 2px;
@@ -1010,6 +1009,13 @@ body.viewer-is-expanded {
   margin: 3px 0;
   font-size: 11px;
   color: var(--muted);
+}
+.issue-group { min-width: 0; }
+.issue-group > .issue-card { width: 100%; }
+.supporting-findings-sublist button { text-align: left; overflow-wrap: anywhere; }
+.drawing-viewport:focus-visible, .supporting-findings-collapse summary:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: -3px;
 }
 
 @media (max-width: 1120px) {
@@ -1032,6 +1038,9 @@ body.viewer-is-expanded {
 }
 
 @media (max-width: 560px) {
+  .results-bar-main { flex-direction: column; }
+  .results-report-actions { align-items: flex-start; min-width: 0; }
+  .setup-summary-header { flex-wrap: wrap; }
   .app-header { display: grid; }
   .status-pill { white-space: normal; }
   .workspace { padding: 10px; }

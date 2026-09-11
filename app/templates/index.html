@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DraftLens EDU — Visual drawing review</title>
-  <link rel="stylesheet" href="/static/style.css?v=0.2.1">
+  <link rel="stylesheet" href="/static/style.css?v=review-usability-2">
   <link rel="icon" href="data:,">
 </head>
 <body>
@@ -261,7 +261,7 @@
           </div>
           <div id="unsupported-notice" class="unsupported-notice-banner" hidden>
             <div class="unsupported-notice-content">
-              <strong id="unsupported-notice-title">Unsupported entities ignored</strong>
+              <strong id="unsupported-notice-title">Unsupported content not assessed</strong>
               <p id="unsupported-notice-text"></p>
             </div>
             <details id="unsupported-notice-details" class="unsupported-notice-details">
@@ -269,7 +269,7 @@
               <ul id="unsupported-notice-list" class="compact-list"></ul>
             </details>
           </div>
-          <div id="drawing-viewport" class="drawing-viewport" aria-live="polite"></div>
+          <div id="drawing-viewport" class="drawing-viewport" tabindex="0" role="region" aria-label="Drawing viewport. Plus and minus zoom; arrow keys pan; Home fits drawing." aria-live="polite"></div>
           <ul id="overlay-legend" class="legend" aria-label="Drawing legend">
             <li class="legend-reference">Reference</li><li class="legend-student">Student</li>
             <li class="legend-missing">Missing</li><li class="legend-extra">Extra</li>
@@ -346,6 +346,6 @@
   </main>
 
   <footer>DraftLens EDU · Approved rubrics · Deterministic geometry · Traceable evidence</footer>
-  <script src="/static/app.js?v=0.2.1"></script>
+  <script src="/static/app.js?v=review-usability-2"></script>
 </body>
 </html>
