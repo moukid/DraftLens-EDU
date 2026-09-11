@@ -65,6 +65,15 @@ ul { padding-left: 18px; }
 }
 
 .app-header p { margin: 2px 0 0; font-size: 12px; }
+.header-credit {
+  margin: 3px 0 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  word-break: break-word;
+}
 .brand {
   color: var(--charcoal);
   font-size: 21px;
@@ -484,7 +493,24 @@ fieldset legend { padding: 0 4px; }
 .normalization-evidence-grid div + div { border-top: 1px solid var(--line); padding-top: 5px; }
 
 
-.drawing-panel { overflow: hidden; }
+.drawing-panel { position: relative; overflow: hidden; }
+.drawing-empty-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 5;
+}
 .panel-heading {
   min-height: 60px;
   padding: 13px 16px;
@@ -565,27 +591,95 @@ fieldset legend { padding: 0 4px; }
   stroke-width: 5px !important;
 }
 
+/* Exclusive visual role drawing filter */
+.drawing-viewport[data-active-role]:not([data-active-role="all"]):not([data-active-role="reference"]) svg [data-layer="reference"] {
+  display: none !important;
+  pointer-events: none !important;
+}
+.drawing-viewport[data-active-role]:not([data-active-role="all"]):not([data-active-role="student"]) svg [data-layer="student"] {
+  display: none !important;
+  pointer-events: none !important;
+}
+.drawing-viewport[data-active-role="reference"] svg [data-layer="issues"],
+.drawing-viewport[data-active-role="student"] svg [data-layer="issues"] {
+  display: none !important;
+  pointer-events: none !important;
+}
+.drawing-viewport[data-active-role="missing"] svg [data-layer="issues"] > g:not([data-role="missing"]),
+.drawing-viewport[data-active-role="extra"] svg [data-layer="issues"] > g:not([data-role="extra"]),
+.drawing-viewport[data-active-role="inaccurate"] svg [data-layer="issues"] > g:not([data-role="inaccurate"]),
+.drawing-viewport[data-active-role="connectivity"] svg [data-layer="issues"] > g:not([data-role="connectivity"]),
+.drawing-viewport[data-active-role="warning"] svg [data-layer="issues"] > g:not([data-role="warning"]),
+.drawing-viewport[data-active-role="critical"] svg [data-layer="issues"] > g:not([data-role="critical"]) {
+  display: none !important;
+  pointer-events: none !important;
+}
+
 .legend {
   min-height: 42px;
   margin: 0;
-  padding: 10px 15px;
+  padding: 8px 12px;
   border-top: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
-  gap: 9px 16px;
+  gap: 6px 10px;
   align-items: center;
   list-style: none;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
+.legend li {
+  display: inline-flex;
+  margin: 0;
+  padding: 0;
+}
 .legend li::before {
+  display: none !important;
+}
+.legend-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.legend-filter-btn:hover {
+  background: var(--surface-muted);
+  border-color: var(--line);
+  color: var(--charcoal);
+}
+.legend-filter-btn:focus-visible {
+  outline: 2px solid #3182ce;
+  outline-offset: 1px;
+}
+.legend-filter-btn.active,
+.legend-filter-btn[aria-pressed="true"] {
+  background: var(--surface);
+  border-color: #a0aec0;
+  color: var(--charcoal);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.legend-filter-btn::before {
   content: "";
   display: inline-block;
   width: 18px;
   margin-right: 6px;
   border-top: 3px solid;
   vertical-align: middle;
+}
+.legend-all::before {
+  border-color: var(--charcoal);
+  border-top-style: solid;
+  border-top-width: 3px;
 }
 .legend-reference::before { border-color: var(--green) !important; opacity: .6; }
 .legend-student::before { border-color: var(--charcoal) !important; }

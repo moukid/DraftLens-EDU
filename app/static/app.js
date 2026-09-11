@@ -19,6 +19,7 @@ const state = {
   review: null,
   selectedIssueId: null,
   filter: "all",
+  activeRole: "all",
   viewMode: "review",
   loading: false,
 };
@@ -125,7 +126,14 @@ document.querySelectorAll("[data-tolerance]").forEach((input) => {
   });
 });
 document.querySelectorAll("[data-filter]").forEach((button) => {
-  button.addEventListener("click", () => setFilter(button.dataset.filter));
+  button.addEventListener("click", () => setActiveRole(button.dataset.filter));
+});
+document.querySelectorAll("#overlay-legend [data-role]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const role = button.dataset.role;
+    if (role === state.activeRole) return;
+    setActiveRole(role);
+  });
 });
 byId("drawing-viewport").addEventListener("click", (event) => {
   if (viewerNav.justDragged) {
@@ -135,10 +143,21 @@ byId("drawing-viewport").addEventListener("click", (event) => {
   if (state.viewMode === "student") return;
   const visual = event.target.closest("[data-issue-id]");
   const issueId = visual ? visual.getAttribute("data-issue-id") : viewerNav.pointerIssueId;
-  if (issueId) selectIssue(issueId, true);
+  if (issueId && state.review) {
+    const issue = (state.review.issues || []).find((i) => i.issue_id === issueId);
+    if (issue && isIssueCompatibleWithRole(issue, state.activeRole)) {
+      selectIssue(issueId, true);
+    }
+  }
 });
-viewReviewButton.addEventListener("click", () => setDrawingViewMode("review"));
-viewStudentButton.addEventListener("click", () => setDrawingViewMode("student"));
+viewReviewButton.addEventListener("click", () => {
+  setActiveRole("all");
+  setDrawingViewMode("review");
+});
+viewStudentButton.addEventListener("click", () => {
+  setActiveRole("student");
+  setDrawingViewMode("student");
+});
 gradeAnywayButton.addEventListener("click", () => runReview(true));
 chooseAnotherFileButton.addEventListener("click", () => studentInput.click());
 
@@ -185,7 +204,7 @@ if (typeof window !== "undefined" && window.addEventListener) {
       const panel = document.querySelector(".drawing-panel");
       const controls = Array.from(panel.querySelectorAll('button:not(:disabled), summary, [tabindex="0"]'))
         .filter((el) => el.getClientRects().length > 0);
-      const first = controls[0], last = controls[controls.length - 1];
+      const first = controls[0], last = byId("drawing-viewport") || controls[controls.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
@@ -355,7 +374,9 @@ function hideError() {
 
 function resetReview() {
   state.review = null;
+  state.activeRole = "all";
   state.filter = "all";
+  setActiveRole("all", false);
   setDrawingViewMode("review");
   resetNormalizationDecision();
   byId("compatibility-card").hidden = true;
@@ -364,6 +385,8 @@ function resetReview() {
   byId("report-status").textContent = "Generate a review to enable its authoritative report.";
   const unsupportedNotice = byId("unsupported-notice");
   if (unsupportedNotice) unsupportedNotice.hidden = true;
+  const emptyOverlay = byId("drawing-empty-overlay");
+  if (emptyOverlay) emptyOverlay.hidden = true;
   resetViewerNav();
   viewerNav.isDragging = false;
   viewerNav.justDragged = false;
@@ -386,6 +409,11 @@ function resetReview() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+  document.querySelectorAll("#overlay-legend [data-role]").forEach((button) => {
+    const active = button.dataset.role === "all";
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function setDrawingViewMode(mode) {
@@ -394,8 +422,8 @@ function setDrawingViewMode(mode) {
   byId("drawing-viewport").classList.toggle("student-only-view", studentOnly);
   viewReviewButton.setAttribute("aria-pressed", String(!studentOnly));
   viewStudentButton.setAttribute("aria-pressed", String(studentOnly));
-  byId("overlay-legend").hidden = studentOnly;
   byId("student-only-status").hidden = !studentOnly;
+  byId("overlay-legend").hidden = studentOnly && false; // byId("overlay-legend").hidden = studentOnly
 }
 
 function resetNormalizationDecision() {
@@ -955,12 +983,17 @@ function renderResults(review) {
   const critical = review.issues.filter((issue) => isPrimaryStudentIssue(issue) && issue.severity === "critical").length;
   byId("critical-summary").textContent = critical ? critical + " critical student issue(s)" : "No critical student issues";
   renderSafeSvg(review.svg);
+  state.activeRole = "all";
   state.filter = "all";
   resetIssueSelection();
-  setFilter("all");
+  setActiveRole("all", false);
   const firstPrimary = presentedIssues(review).find(isPrimaryStudentIssue);
   if (firstPrimary) {
-    selectIssue(firstPrimary.issue_id, false);
+    state.selectedIssueId = firstPrimary.issue_id;
+    if (viewerLocateButton) viewerLocateButton.disabled = false;
+    renderIssueList();
+    highlightSelectedIssueInDrawing(firstPrimary.issue_id);
+    renderFeedback(firstPrimary);
   } else {
     const message = review.issues.length
       ? "No primary student issues. Supporting and reference findings are listed separately."
@@ -1424,14 +1457,113 @@ function renderUnsupportedNotice(review) {
   }
 }
 
-function setFilter(filter) {
-  state.filter = filter || "all";
-  document.querySelectorAll("[data-filter]").forEach((button) => {
-    const active = button.dataset.filter === state.filter;
+function isIssueCompatibleWithRole(issue, role) {
+  if (!issue) return false;
+  if (role === "all") return true;
+  if (role === "reference" || role === "student") return false;
+  return issue.visual_role === role;
+}
+
+function hasGraphicsForRole(role) {
+  if (!state.review) return false;
+  if (role === "all") return true;
+  const svg = getViewportSvg();
+  if (!svg) return false;
+  if (role === "reference") {
+    const layer = svg.querySelector ? svg.querySelector('[data-layer="reference"]') : null;
+    return Boolean(layer && layer.children && layer.children.length > 0);
+  }
+  if (role === "student") {
+    const layer = svg.querySelector ? svg.querySelector('[data-layer="student"]') : null;
+    return Boolean(layer && layer.children && layer.children.length > 0);
+  }
+  const groups = svg.querySelectorAll ? svg.querySelectorAll(`[data-layer="issues"] g[data-role="${role}"]`) : [];
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    if (typeof g.getAttribute === "function" && g.getAttribute("data-geometry") === "unavailable") continue;
+    if (g.children && g.children.length > 0) return true;
+  }
+  return false;
+}
+
+function updateDrawingEmptyState(role) {
+  const overlay = byId("drawing-empty-overlay");
+  if (!overlay) return;
+  if (!state.review) {
+    overlay.hidden = true;
+    return;
+  }
+  const hasGraphics = hasGraphicsForRole(role);
+  if (!hasGraphics && role !== "all") {
+    overlay.textContent = "No " + role + " indications";
+    overlay.hidden = false;
+  } else {
+    overlay.hidden = true;
+  }
+}
+
+function highlightSelectedIssueInDrawing(issueId) {
+  document.querySelectorAll("#drawing-viewport [data-issue-id]").forEach((element) => {
+    element.classList.toggle("is-selected", element.getAttribute("data-issue-id") === issueId);
+  });
+}
+
+function setActiveRole(role, preserveSelection = true) {
+  if (!role) role = "all";
+  state.activeRole = role;
+
+  // 1. Legend buttons: exclusive active state
+  document.querySelectorAll("#overlay-legend [data-role]").forEach((button) => {
+    const active = button.dataset.role === role;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+
+  // 2. Findings filter synchronization: Reference and Student leave Findings on All
+  const targetFilter = (role === "reference" || role === "student") ? "all" : role;
+  state.filter = targetFilter;
+  document.querySelectorAll(".filters [data-filter]").forEach((button) => {
+    const active = button.dataset.filter === targetFilter;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+
+  // 3. Drawing Viewport data attribute and mode
+  const viewport = byId("drawing-viewport");
+  if (viewport) {
+    viewport.setAttribute("data-active-role", role);
+    viewport.classList.toggle("student-only-view", role === "student");
+  }
+  state.viewMode = role === "student" ? "student" : "review";
+  if (viewReviewButton) viewReviewButton.setAttribute("aria-pressed", String(role === "all"));
+  if (viewStudentButton) viewStudentButton.setAttribute("aria-pressed", String(role === "student"));
+  const statusEl = byId("student-only-status");
+  if (statusEl) statusEl.hidden = role !== "student";
+  const legendEl = byId("overlay-legend");
+  if (legendEl) legendEl.hidden = false;
+
+  // 4. Incompatible issue selection handling
+  if (state.selectedIssueId && preserveSelection && state.review) {
+    const current = (state.review.issues || []).find((i) => i.issue_id === state.selectedIssueId);
+    if (!current || !isIssueCompatibleWithRole(current, role)) {
+      resetIssueSelection("Select an issue in the list or drawing.");
+    }
+  }
+
+  // 5. Empty indications feedback
+  updateDrawingEmptyState(role);
+
+  // 6. Re-render Issue list (respects state.filter)
   renderIssueList();
+
+  // 7. Maintain selected issue highlight if still selected
+  if (state.selectedIssueId) {
+    highlightSelectedIssueInDrawing(state.selectedIssueId);
+  }
+}
+
+function setFilter(filter) {
+  setActiveRole(filter);
 }
 
 function renderIssueList() {
@@ -1535,12 +1667,14 @@ function selectIssue(issueId, scrollList) {
   if (!state.review) return;
   const issue = state.review.issues.find((item) => item.issue_id === issueId);
   if (!issue) return;
+  const targetRole = issue.visual_role || "all";
+  if (state.activeRole !== targetRole) {
+    setActiveRole(targetRole, false);
+  }
   state.selectedIssueId = issueId;
   if (viewerLocateButton) viewerLocateButton.disabled = false;
   renderIssueList();
-  document.querySelectorAll("#drawing-viewport [data-issue-id]").forEach((element) => {
-    element.classList.toggle("is-selected", element.getAttribute("data-issue-id") === issueId);
-  });
+  highlightSelectedIssueInDrawing(issueId);
   renderFeedback(issue);
   if (scrollList) {
     const card = document.querySelector("#issue-list [data-issue-id='" + cssEscape(issueId) + "']");
@@ -1690,6 +1824,10 @@ function getViewerNav() {
 
 function getState() {
   return state;
+}
+
+function getActiveRole() {
+  return state.activeRole;
 }
 
 updateWeightTotal();

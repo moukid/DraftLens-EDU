@@ -12,6 +12,7 @@
     <div>
       <a class="brand" href="/" aria-label="DraftLens EDU home">DraftLens <span>EDU</span></a>
       <p>Deterministic CAD grading and visual evidence</p>
+      <p class="header-credit">All rights reserved to MOUKiD BADiE &amp; Mervat El-Sawaf</p>
     </div>
     <p id="workflow-status" class="status-pill" role="status">Waiting for reference</p>
   </header>
@@ -270,11 +271,17 @@
             </details>
           </div>
           <div id="drawing-viewport" class="drawing-viewport" tabindex="0" role="region" aria-label="Drawing viewport. Plus and minus zoom; arrow keys pan; Home fits drawing." aria-live="polite"></div>
-          <ul id="overlay-legend" class="legend" aria-label="Drawing legend">
-            <li class="legend-reference">Reference</li><li class="legend-student">Student</li>
-            <li class="legend-missing">Missing</li><li class="legend-extra">Extra</li>
-            <li class="legend-inaccurate">Inaccurate</li><li class="legend-connectivity">Connectivity</li>
-            <li class="legend-warning">Warning</li><li class="legend-critical">Critical</li>
+          <p id="drawing-empty-overlay" class="drawing-empty-overlay" hidden aria-live="polite"></p>
+          <ul id="overlay-legend" class="legend" role="toolbar" aria-label="Drawing legend and visual role filter">
+            <li><button type="button" class="legend-filter-btn legend-all active" data-role="all" aria-pressed="true">All</button></li>
+            <li><button type="button" class="legend-filter-btn legend-reference" data-role="reference" aria-pressed="false">Reference</button></li>
+            <li><button type="button" class="legend-filter-btn legend-student" data-role="student" aria-pressed="false">Student</button></li>
+            <li><button type="button" class="legend-filter-btn legend-missing" data-role="missing" aria-pressed="false">Missing</button></li>
+            <li><button type="button" class="legend-filter-btn legend-extra" data-role="extra" aria-pressed="false">Extra</button></li>
+            <li><button type="button" class="legend-filter-btn legend-inaccurate" data-role="inaccurate" aria-pressed="false">Inaccurate</button></li>
+            <li><button type="button" class="legend-filter-btn legend-connectivity" data-role="connectivity" aria-pressed="false">Connectivity</button></li>
+            <li><button type="button" class="legend-filter-btn legend-warning" data-role="warning" aria-pressed="false">Warning</button></li>
+            <li><button type="button" class="legend-filter-btn legend-critical" data-role="critical" aria-pressed="false">Critical</button></li>
           </ul>
           <p id="student-only-status" class="student-only-status" hidden>Student submission only &mdash; DraftLens overlays are hidden.</p>
         </section>
