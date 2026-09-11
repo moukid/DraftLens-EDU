@@ -1,5 +1,17 @@
 # Independent usability review and targeted repair
 
+## Status clarification — 2026-09-11 (Africa/Cairo)
+
+This dated addendum applies MOUKID's clarified scope. The original report and findings below are preserved as historical evidence; its combined-release verdict must not be read as rejection of the usability work.
+
+- **A. Usability acceptance: verified according to the reported checks; ready for MOUKID's local acceptance.** Scope: #8, #9, #3, #4, and focused UI improvements. The prior 423-test, live-browser, and rendered-PDF results apply to reviewed code commit `1041bea996b1be39af98c6358af696368c5a3301`. No full-suite rerun was performed merely to start acceptance.
+- **B. Combined release: pending ellipse integration and verification; not release-ready.** #5 and #11 are separate workstreams, outside usability acceptance. Their absence is not a regression introduced by this usability implementation.
+- Resolved current usability branch HEAD, including the original documentation commit: `6e620fadac57f778dc4765dcc3766367aab4b83e` on `feature/review-usability-v1`. This addendum and the integration plan are documentation-only working-tree changes, deliberately uncommitted in this bounded investigation; no branch tip or root change was staged or committed.
+- Exact acceptance worktree: `D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.worktrees\review-usability`. Dedicated acceptance URL started on this date: `http://127.0.0.1:8766/`. HTTP 200, the `review-usability-2` asset marker, and byte-for-text equality of served JavaScript with this worktree were verified. The server is bound only to loopback and explicitly uses this worktree; unrelated servers were not terminated.
+- Further code inspection resolves the earlier #11 uncertainty more precisely: ellipse parsing/rendering and generic property signatures exist, but ellipse-axis size comparison and its regression coverage were not found in the available sources. Three changed-axis comparison probes still return score 100 with no issues. This is a separate comparison gap, not completed #11 integration.
+
+See [the dated acceptance and integration plan](review-usability-integration-plan.md) for source commits, root-file fingerprints, current focused #5 evidence, the exact launch command, acceptance checklist, and proposed gated integration sequence. The original historical wording below is retained rather than silently rewritten.
+
 ## Verdict
 
 **FAIL — release blockers remain.** The approved usability repairs pass the checks below, but this branch does not include the verified Issue #5 baseline and the required Issue #11 integration source is unidentified. This is not approval to push, merge, close issues, or start a release.
