@@ -123,6 +123,77 @@ def _finite(value: Any) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(float(value))
 
 
+def sample_ellipse_arc(
+    center: tuple[float, float],
+    major_axis: tuple[float, float] | list[float],
+    ratio: float,
+    start_param: float | None,
+    end_param: float | None,
+    num_segments: int = 64,
+) -> list[tuple[float, float]] | None:
+    """Sample a partial DXF ellipse as an open sequence of 2D points.
+
+    Returns None when the ellipse represents a complete ellipse (start/end params omitted
+    or covering a full 2*pi turn), indicating that native full-ellipse rendering should be used.
+    Otherwise, returns an open list of points covering [start_param, end_param] counterclockwise.
+    """
+    if start_param is None or end_param is None:
+        return None
+    try:
+        sp = float(start_param)
+        ep = float(end_param)
+        r = abs(float(ratio))
+        cx, cy = float(center[0]), float(center[1])
+        vx, vy = float(major_axis[0]), float(major_axis[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+    if not (
+        math.isfinite(sp)
+        and math.isfinite(ep)
+        and math.isfinite(r)
+        and math.isfinite(cx)
+        and math.isfinite(cy)
+        and math.isfinite(vx)
+        and math.isfinite(vy)
+    ):
+        return None
+
+    tau = 2.0 * math.pi
+    diff = ep - sp
+
+    # If the span covers 2*pi or more, it is a complete ellipse
+    if abs(diff) >= tau - 1e-5:
+        return None
+
+    span = diff % tau
+    if span < 0:
+        span += tau
+
+    # If span is practically 2*pi, or wrapped to 0 when diff > 1e-5
+    if abs(span - tau) < 1e-5 or (span <= 1e-7 and abs(diff) > 1e-5):
+        return None
+
+    wx, wy = -vy * r, vx * r
+
+    if span <= 1e-7:
+        p = (
+            cx + vx * math.cos(sp) + wx * math.sin(sp),
+            cy + vy * math.cos(sp) + wy * math.sin(sp),
+        )
+        return [p, p]
+
+    n = max(32, int(math.ceil(num_segments * (span / tau))))
+    points: list[tuple[float, float]] = []
+    for i in range(n + 1):
+        t = sp + span if i == n else sp + span * (i / n)
+        px = cx + vx * math.cos(t) + wx * math.sin(t)
+        py = cy + vy * math.cos(t) + wy * math.sin(t)
+        points.append((px, py))
+
+    return points
+
+
 def _entity_bounds(entity: Entity) -> tuple[float, float, float, float] | None:
     points = [(float(x), float(y)) for x, y in entity.points if _finite(x) and _finite(y)]
     if entity.kind in {"circle", "arc"} and points and _finite(entity.radius):
@@ -132,6 +203,17 @@ def _entity_bounds(entity: Entity) -> tuple[float, float, float, float] | None:
     if entity.kind == "ellipse" and points:
         major = entity.properties.get("major_axis", (0.0, 0.0))
         if len(major) >= 2 and _finite(major[0]) and _finite(major[1]):
+            sampled = sample_ellipse_arc(
+                points[0],
+                major,
+                float(entity.properties.get("ratio", 1.0)),
+                entity.properties.get("start_param"),
+                entity.properties.get("end_param"),
+            )
+            if sampled is not None and sampled:
+                xs = [p[0] for p in sampled]
+                ys = [p[1] for p in sampled]
+                return (min(xs), min(ys), max(xs), max(ys))
             rx = math.hypot(float(major[0]), float(major[1]))
             ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
             radius = max(rx, ry)

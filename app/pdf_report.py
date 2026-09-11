@@ -21,7 +21,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import CondPageBreak, Flowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .review_snapshot import ReviewSnapshot
-from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue
+from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue, sample_ellipse_arc
 from .svg_renderer import CoordinateTransform
 
 FONT_NAME = "DraftLensVera"
@@ -192,10 +192,24 @@ class ReviewedDrawingFlowable(Flowable):
         elif entity.kind == "ellipse" and points:
             major = entity.properties.get("major_axis", [0.0, 0.0])
             if len(major) >= 2:
-                rx = transform.length(math.hypot(float(major[0]), float(major[1]))); ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
-                center = self._point(transform, points[0]); angle = math.degrees(math.atan2(float(major[1]), float(major[0])))
-                self.canv.saveState(); self.canv.translate(*center); self.canv.rotate(angle)
-                self.canv.ellipse(-rx, -ry, rx, ry, stroke=1, fill=0); self.canv.restoreState()
+                sampled = sample_ellipse_arc(
+                    points[0],
+                    major,
+                    float(entity.properties.get("ratio", 1.0)),
+                    entity.properties.get("start_param"),
+                    entity.properties.get("end_param"),
+                )
+                if sampled is not None and sampled:
+                    path = self.canv.beginPath()
+                    path.moveTo(*self._point(transform, sampled[0]))
+                    for p in sampled[1:]:
+                        path.lineTo(*self._point(transform, p))
+                    self.canv.drawPath(path, stroke=1, fill=0)
+                else:
+                    rx = transform.length(math.hypot(float(major[0]), float(major[1]))); ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
+                    center = self._point(transform, points[0]); angle = math.degrees(math.atan2(float(major[1]), float(major[0])))
+                    self.canv.saveState(); self.canv.translate(*center); self.canv.rotate(angle)
+                    self.canv.ellipse(-rx, -ry, rx, ry, stroke=1, fill=0); self.canv.restoreState()
         elif entity.kind == "text" and points:
             self.canv.setFont(FONT_NAME, 5.5); self.canv.drawString(*self._point(transform, points[0]), _display_text(entity.text or ""))
 

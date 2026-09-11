@@ -4,7 +4,7 @@ from html import escape
 import math
 from typing import Any
 
-from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue
+from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue, sample_ellipse_arc
 
 
 SVG_STYLE = """svg{background:#fff}g{vector-effect:non-scaling-stroke}.reference{fill:none;stroke:#2f855a;stroke-width:1;opacity:.42}.student{fill:none;stroke:#24313a;stroke-width:1.35}.missing{fill:none;stroke:#ed8936;stroke-width:3;stroke-dasharray:9 6}.extra{fill:none;stroke:#3182ce;stroke-width:3}.inaccurate-expected{fill:none;stroke:#ed8936;stroke-width:2;stroke-dasharray:7 5}.inaccurate-actual{fill:none;stroke:#e53e3e;stroke-width:3}.connectivity{fill:none;stroke:#d53f8c;stroke-width:3}.warning{fill:#ecc94b;fill-opacity:.12;stroke:#b7791f;stroke-width:2;stroke-dasharray:4 4}.critical{fill:#e53e3e;fill-opacity:.12;stroke:#c53030;stroke-width:3}.entity-text{font:12px sans-serif;fill:currentColor;stroke:none}.empty{font:14px sans-serif;fill:#718096;stroke:none}"""
@@ -97,6 +97,17 @@ def _entity_svg(entity: ReviewedEntity, css_class: str, transform: CoordinateTra
     if entity.kind == "ellipse" and points:
         major = entity.properties.get("major_axis", [0.0, 0.0])
         if len(major) >= 2:
+            sampled = sample_ellipse_arc(
+                points[0],
+                major,
+                float(entity.properties.get("ratio", 1.0)),
+                entity.properties.get("start_param"),
+                entity.properties.get("end_param"),
+            )
+            if sampled is not None and sampled:
+                transformed = [transform.point(p) for p in sampled]
+                d = "M " + " L ".join(f"{_number(p[0])} {_number(p[1])}" for p in transformed)
+                return f'<path {attrs} d="{d}" fill="none"/>'
             rx = math.hypot(float(major[0]), float(major[1]))
             ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
             angle = -math.degrees(math.atan2(float(major[1]), float(major[0])))
