@@ -18,6 +18,22 @@
 
   <main class="workspace">
     <aside class="setup-column" aria-label="Review setup">
+      <section id="setup-summary" class="panel setup-summary-card" aria-labelledby="setup-summary-heading" hidden>
+        <div class="setup-summary-header">
+          <div>
+            <p class="eyebrow">Assignment setup</p>
+            <h2 id="setup-summary-heading">Approved assignment</h2>
+          </div>
+          <button id="edit-setup" type="button" class="secondary-button" aria-expanded="false">Edit assignment</button>
+        </div>
+        <dl class="setup-summary-grid">
+          <div><dt>Reference</dt><dd id="summary-reference-name">—</dd></div>
+          <div><dt>Assignment title</dt><dd id="summary-assignment-title">—</dd></div>
+          <div><dt>Assignment type</dt><dd id="summary-assignment-type">—</dd></div>
+          <div><dt>Placement policy</dt><dd id="summary-placement-policy">—</dd></div>
+        </dl>
+      </section>
+
       <section class="panel" aria-labelledby="reference-heading">
         <div class="step-heading"><span>1</span><div><h1 id="reference-heading">Reference drawing</h1><p>Validate the instructor solution before grading.</p></div></div>
         <label class="file-field" for="reference-file">
@@ -125,6 +141,10 @@
         </div>
         <button id="run-review" type="button" class="primary-button" disabled>Generate visual review</button>
         <button id="download-report" type="button" class="report-button" disabled>Download PDF report</button>
+        <label class="appendix-toggle" for="include-appendix">
+          <input id="include-appendix" type="checkbox">
+          <span>Include technical appendix</span>
+        </label>
         <p id="report-status" class="supporting-text" role="status">Generate a review to enable its authoritative report.</p>
         <p id="api-error" class="error-message" role="alert" hidden></p>
       </section>
@@ -139,7 +159,16 @@
 
       <div id="review-results" hidden>
         <section class="results-bar" aria-labelledby="results-heading">
-          <div><p class="eyebrow">Reviewed result</p><h2 id="results-heading">Drawing assessment</h2><p id="result-rubric">—</p><dl class="metric-grid result-context"><div><dt>Assignment type</dt><dd id="result-assignment-type">Not confirmed</dd></div><div><dt>Detected structure</dt><dd id="result-detected-features">Not analyzed</dd></div></dl></div>
+          <div class="results-bar-main">
+            <div><p class="eyebrow">Reviewed result</p><h2 id="results-heading">Drawing assessment</h2><p id="result-rubric">—</p><dl class="metric-grid result-context"><div><dt>Assignment type</dt><dd id="result-assignment-type">Not confirmed</dd></div><div><dt>Detected structure</dt><dd id="result-detected-features">Not analyzed</dd></div></dl></div>
+            <div class="results-report-actions">
+              <button id="download-report-header" type="button" class="report-button" disabled>Download PDF report</button>
+              <label class="appendix-toggle" for="include-appendix-header">
+                <input id="include-appendix-header" type="checkbox">
+                <span>Include technical appendix</span>
+              </label>
+            </div>
+          </div>
           <p class="result-assignment-title">Assignment title: <strong id="result-assignment-title">Not confirmed</strong></p>
           <dl class="result-metrics">
             <div class="score-metric"><dt>Score</dt><dd><strong id="result-score">—</strong><span>/100</span></dd></div>
@@ -214,6 +243,14 @@
           <div class="panel-heading drawing-panel-heading">
             <div><p class="eyebrow">Expected vs actual</p><h2 id="drawing-heading">Reviewed drawing</h2></div>
             <div class="drawing-heading-actions">
+              <div class="drawing-nav-toolbar" role="toolbar" aria-label="Drawing navigation">
+                <button id="viewer-zoom-in" type="button" class="nav-button" title="Zoom in (+)" aria-label="Zoom in">+</button>
+                <button id="viewer-zoom-out" type="button" class="nav-button" title="Zoom out (−)" aria-label="Zoom out">−</button>
+                <button id="viewer-reset" type="button" class="nav-button" title="Fit to window / Reset view" aria-label="Reset view">Fit</button>
+                <button id="viewer-locate-issue" type="button" class="nav-button" title="Locate selected issue" aria-label="Locate issue" disabled>Locate</button>
+                <button id="viewer-expand" type="button" class="nav-button" title="Expand drawing view" aria-label="Expand view">Expand</button>
+                <button id="viewer-exit-expand" type="button" class="nav-button" title="Exit expanded view (Esc)" aria-label="Exit expanded view" hidden>Exit</button>
+              </div>
               <p id="critical-summary" class="critical-summary"></p>
               <div id="drawing-view-controls" class="view-mode-control" role="group" aria-label="Drawing view">
                 <span>View:</span>
@@ -221,6 +258,16 @@
                 <button id="view-student-only" type="button" aria-controls="drawing-viewport" aria-pressed="false">Student only</button>
               </div>
             </div>
+          </div>
+          <div id="unsupported-notice" class="unsupported-notice-banner" hidden>
+            <div class="unsupported-notice-content">
+              <strong id="unsupported-notice-title">Unsupported entities ignored</strong>
+              <p id="unsupported-notice-text"></p>
+            </div>
+            <details id="unsupported-notice-details" class="unsupported-notice-details">
+              <summary>View unsupported breakdown</summary>
+              <ul id="unsupported-notice-list" class="compact-list"></ul>
+            </details>
           </div>
           <div id="drawing-viewport" class="drawing-viewport" aria-live="polite"></div>
           <ul id="overlay-legend" class="legend" aria-label="Drawing legend">
@@ -234,7 +281,13 @@
 
         <div class="review-detail-grid">
           <section class="issues-panel" aria-labelledby="issues-heading">
-            <div class="panel-heading"><div><p class="eyebrow">Findings</p><h2 id="issues-heading">Issue list</h2></div></div>
+            <div class="panel-heading issues-panel-heading">
+              <div><p class="eyebrow">Findings</p><h2 id="issues-heading">Issue list</h2></div>
+              <label class="technical-toggle" for="toggle-technical-details">
+                <input id="toggle-technical-details" type="checkbox">
+                <span>Show technical details</span>
+              </label>
+            </div>
             <div class="filters" role="group" aria-label="Filter issues">
               <button type="button" data-filter="all" class="active" aria-pressed="true">All</button>
               <button type="button" data-filter="missing" aria-pressed="false">Missing</button>

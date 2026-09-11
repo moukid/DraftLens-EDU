@@ -35,11 +35,46 @@ ruleBasedOption.textContent = "Rule-based completion";
 const approveButton = byId("approve-rubric");
 const reviewButton = byId("run-review");
 const downloadReportButton = byId("download-report");
+const editSetupButton = byId("edit-setup");
+const downloadReportHeaderButton = byId("download-report-header");
+const includeAppendixCheckbox = byId("include-appendix");
+const includeAppendixHeaderCheckbox = byId("include-appendix-header");
+const viewerZoomInButton = byId("viewer-zoom-in");
+const viewerZoomOutButton = byId("viewer-zoom-out");
+const viewerResetButton = byId("viewer-reset");
+const viewerLocateButton = byId("viewer-locate-issue");
+const viewerExpandButton = byId("viewer-expand");
+const viewerExitExpandButton = byId("viewer-exit-expand");
+const toggleTechnicalDetailsCheckbox = byId("toggle-technical-details");
 const metadataInputs = [byId("student-metadata-name"), byId("student-metadata-id"), byId("course-section")];
 const viewReviewButton = byId("view-review-comparison");
 const viewStudentButton = byId("view-student-only");
 const gradeAnywayButton = byId("grade-anyway");
 const chooseAnotherFileButton = byId("choose-another-file");
+
+const viewerNav = {
+  baseX: 0,
+  baseY: 0,
+  baseWidth: 1000,
+  baseHeight: 1000,
+  currentX: 0,
+  currentY: 0,
+  currentWidth: 1000,
+  currentHeight: 1000,
+  scale: 1.0,
+  minScale: 0.2,
+  maxScale: 20.0,
+  isDragging: false,
+  startX: 0,
+  startY: 0,
+  startViewX: 0,
+  startViewY: 0,
+  totalDragDistance: 0,
+  justDragged: false,
+  isExpanded: false,
+};
+let showTechnicalDetails = false;
+
 
 
 referenceInput.addEventListener("change", () => inspectReference(referenceInput.files[0] || null));
@@ -93,6 +128,10 @@ document.querySelectorAll("[data-filter]").forEach((button) => {
   button.addEventListener("click", () => setFilter(button.dataset.filter));
 });
 byId("drawing-viewport").addEventListener("click", (event) => {
+  if (viewerNav.justDragged) {
+    viewerNav.justDragged = false;
+    return;
+  }
   if (state.viewMode === "student") return;
   const visual = event.target.closest("[data-issue-id]");
   if (visual) selectIssue(visual.getAttribute("data-issue-id"), true);
@@ -101,6 +140,110 @@ viewReviewButton.addEventListener("click", () => setDrawingViewMode("review"));
 viewStudentButton.addEventListener("click", () => setDrawingViewMode("student"));
 gradeAnywayButton.addEventListener("click", () => runReview(true));
 chooseAnotherFileButton.addEventListener("click", () => studentInput.click());
+
+if (editSetupButton) {
+  editSetupButton.addEventListener("click", () => {
+    const col = document.querySelector(".setup-column");
+    const isCurrentlyCollapsed = col ? col.classList.contains("is-collapsed") : false;
+    setSetupCollapsed(!isCurrentlyCollapsed);
+  });
+}
+if (downloadReportHeaderButton) downloadReportHeaderButton.addEventListener("click", downloadReport);
+if (includeAppendixCheckbox && includeAppendixHeaderCheckbox) {
+  includeAppendixCheckbox.addEventListener("change", () => {
+    includeAppendixHeaderCheckbox.checked = includeAppendixCheckbox.checked;
+  });
+  includeAppendixHeaderCheckbox.addEventListener("change", () => {
+    includeAppendixCheckbox.checked = includeAppendixHeaderCheckbox.checked;
+  });
+}
+if (viewerZoomInButton) viewerZoomInButton.addEventListener("click", () => zoomViewer(1.25));
+if (viewerZoomOutButton) viewerZoomOutButton.addEventListener("click", () => zoomViewer(0.8));
+if (viewerResetButton) viewerResetButton.addEventListener("click", resetViewerNav);
+if (viewerLocateButton) viewerLocateButton.addEventListener("click", () => {
+  if (state.selectedIssueId) locateIssueInViewer(state.selectedIssueId);
+});
+if (viewerExpandButton) viewerExpandButton.addEventListener("click", () => setExpandedView(true));
+if (viewerExitExpandButton) viewerExitExpandButton.addEventListener("click", () => setExpandedView(false));
+if (toggleTechnicalDetailsCheckbox) {
+  toggleTechnicalDetailsCheckbox.addEventListener("change", () => {
+    showTechnicalDetails = toggleTechnicalDetailsCheckbox.checked;
+    renderIssueList();
+    if (state.selectedIssueId) {
+      const sel = (state.review && state.review.issues || []).find((i) => i.issue_id === state.selectedIssueId);
+      if (sel) renderFeedback(sel);
+    }
+  });
+}
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && viewerNav.isExpanded) {
+      setExpandedView(false);
+    }
+  });
+}
+
+const drawingViewportEl = byId("drawing-viewport");
+drawingViewportEl.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  viewerNav.isDragging = true;
+  viewerNav.startX = e.clientX;
+  viewerNav.startY = e.clientY;
+  viewerNav.startViewX = viewerNav.currentX;
+  viewerNav.startViewY = viewerNav.currentY;
+  viewerNav.totalDragDistance = 0;
+  viewerNav.justDragged = false;
+  if (typeof drawingViewportEl.setPointerCapture === "function") {
+    try { drawingViewportEl.setPointerCapture(e.pointerId); } catch (_) {}
+  }
+});
+
+drawingViewportEl.addEventListener("pointermove", (e) => {
+  if (!viewerNav.isDragging) return;
+  const dx = e.clientX - viewerNav.startX;
+  const dy = e.clientY - viewerNav.startY;
+  const dist = Math.hypot(dx, dy);
+  viewerNav.totalDragDistance = dist;
+  if (dist > 5) {
+    viewerNav.justDragged = true;
+    drawingViewportEl.classList.add("is-panning");
+  }
+  const svg = drawingViewportEl.querySelector("svg");
+  let rectWidth = 800;
+  let rectHeight = 600;
+  if (svg && typeof svg.getBoundingClientRect === "function") {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width > 0) rectWidth = rect.width;
+    if (rect.height > 0) rectHeight = rect.height;
+  }
+  const scaleX = viewerNav.currentWidth / rectWidth;
+  const scaleY = viewerNav.currentHeight / rectHeight;
+  viewerNav.currentX = viewerNav.startViewX - dx * scaleX;
+  viewerNav.currentY = viewerNav.startViewY - dy * scaleY;
+  applyViewBox();
+});
+
+const endViewportDrag = (e) => {
+  if (!viewerNav.isDragging) return;
+  viewerNav.isDragging = false;
+  if (typeof drawingViewportEl.releasePointerCapture === "function" && e.pointerId) {
+    try { drawingViewportEl.releasePointerCapture(e.pointerId); } catch (_) {}
+  }
+  drawingViewportEl.classList.remove("is-panning");
+  if (viewerNav.totalDragDistance > 5) {
+    setTimeout(() => { viewerNav.justDragged = false; }, 60);
+  } else {
+    viewerNav.justDragged = false;
+  }
+};
+drawingViewportEl.addEventListener("pointerup", endViewportDrag);
+drawingViewportEl.addEventListener("pointercancel", endViewportDrag);
+
+drawingViewportEl.addEventListener("wheel", (e) => {
+  if (typeof e.preventDefault === "function") e.preventDefault();
+  const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+  zoomViewer(zoomFactor, e.clientX, e.clientY);
+}, { passive: false });
 
 function uploadForm(field, file) {
   const form = new FormData();
@@ -198,7 +341,11 @@ function resetReview() {
   resetNormalizationDecision();
   byId("compatibility-card").hidden = true;
   downloadReportButton.disabled = true;
+  if (downloadReportHeaderButton) downloadReportHeaderButton.disabled = true;
   byId("report-status").textContent = "Generate a review to enable its authoritative report.";
+  const unsupportedNotice = byId("unsupported-notice");
+  if (unsupportedNotice) unsupportedNotice.hidden = true;
+  resetViewerNav();
 
   resetIssueSelection("Select an issue in the list or drawing.");
   byId("review-results").hidden = true;
@@ -244,6 +391,7 @@ function resetNormalizationDecision() {
 
 function resetIssueSelection(message) {
   state.selectedIssueId = null;
+  if (viewerLocateButton) viewerLocateButton.disabled = true;
   document.querySelectorAll("#drawing-viewport [data-issue-id]").forEach((element) => {
     element.classList.remove("is-selected");
   });
@@ -318,6 +466,7 @@ function resetReferenceDependentState() {
   byId("rubric-empty").hidden = false;
   byId("rubric-status").textContent = "";
   resetReview();
+  updateSetupSummary();
 }
 
 async function inspectReference(file) {
@@ -628,6 +777,7 @@ async function approveRubric() {
     assignmentTypeInput.disabled = false;
     byId("rubric-status").textContent = "Approved and associated. Assignment type: " + state.provisionalRubric.assignment_type + ". Placement: " + placementModeLabel(state.provisionalRubric.normalization_mode) + ". Completion policy: " + completionPolicyLabel(state.provisionalRubric.completion_scoring_mode) + ".";
     setWorkflowStatus("Rubric approved — add student drawing", "success");
+    updateSetupSummary();
   } catch (error) {
     showError(error);
   } finally {
@@ -662,6 +812,7 @@ function updateReviewAvailability() {
 function updateReportAvailability() {
   const available = Boolean(state.review && state.review.review_id && state.review.report_available);
   downloadReportButton.disabled = state.loading || !available;
+  if (downloadReportHeaderButton) downloadReportHeaderButton.disabled = state.loading || !available;
   if (available) byId("report-status").textContent = "Authoritative PDF report ready.";
   else if (state.review && state.review.grading_status === "withheld") {
     byId("report-status").textContent = "PDF report unavailable while grading is withheld.";
@@ -671,7 +822,15 @@ function updateReportAvailability() {
 function downloadReport() {
   if (!state.review || !state.review.review_id || !state.review.report_available) return;
   const reviewId = encodeURIComponent(state.review.review_id);
-  window.location.assign("/api/reviews/" + reviewId + "/report.pdf");
+  const includeAppendix = Boolean(
+    (includeAppendixHeaderCheckbox && includeAppendixHeaderCheckbox.checked) ||
+    (includeAppendixCheckbox && includeAppendixCheckbox.checked)
+  );
+  if (includeAppendix) {
+    window.location.assign("/api/reviews/" + reviewId + "/report.pdf?include_appendix=true");
+  } else {
+    window.location.assign("/api/reviews/" + reviewId + "/report.pdf");
+  }
 }
 
 async function runReview(instructorOverride = false) {
@@ -737,6 +896,9 @@ function renderResults(review) {
   renderCompatibility(review);
   renderScoreBreakdown(review, completionMode);
   renderNormalizationDecision(review);
+  renderUnsupportedNotice(review);
+  updateSetupSummary();
+  setSetupCollapsed(true);
   const critical = review.issues.filter((issue) => isPrimaryStudentIssue(issue) && issue.severity === "critical").length;
   byId("critical-summary").textContent = critical ? critical + " critical student issue(s)" : "No critical student issues";
   renderSafeSvg(review.svg);
@@ -1000,8 +1162,187 @@ function renderSafeSvg(markup) {
   }
   const sanitized = sanitizeSvgDocument(documentNode);
   sanitized.classList.add("reviewed-svg");
+
+  const viewBoxAttr = sanitized.getAttribute("viewBox");
+  if (viewBoxAttr) {
+    const parts = viewBoxAttr.trim().split(/\s+/).map(Number);
+    if (parts.length === 4 && parts.every(Number.isFinite) && parts[2] > 0 && parts[3] > 0) {
+      viewerNav.baseX = parts[0];
+      viewerNav.baseY = parts[1];
+      viewerNav.baseWidth = parts[2];
+      viewerNav.baseHeight = parts[3];
+      viewerNav.currentX = parts[0];
+      viewerNav.currentY = parts[1];
+      viewerNav.currentWidth = parts[2];
+      viewerNav.currentHeight = parts[3];
+      viewerNav.scale = 1.0;
+    }
+  }
+
   const imported = document.importNode(sanitized, true);
   byId("drawing-viewport").replaceChildren(imported);
+}
+
+function getViewportSvg() {
+  const viewport = byId("drawing-viewport");
+  if (!viewport) return null;
+  if (viewport.children && viewport.children.length > 0) {
+    const found = viewport.children.find ? viewport.children.find((c) => (c.tagName || c.nodeName || "").toLowerCase() === "svg") : viewport.children[0];
+    if (found) return found;
+  }
+  if (typeof viewport.querySelector === "function") {
+    return viewport.querySelector("svg");
+  }
+  return null;
+}
+
+function applyViewBox() {
+  const svg = getViewportSvg();
+  if (!svg) return;
+  const vb = `${viewerNav.currentX} ${viewerNav.currentY} ${viewerNav.currentWidth} ${viewerNav.currentHeight}`;
+  svg.setAttribute("viewBox", vb);
+}
+
+function resetViewerNav() {
+  viewerNav.currentX = viewerNav.baseX;
+  viewerNav.currentY = viewerNav.baseY;
+  viewerNav.currentWidth = viewerNav.baseWidth;
+  viewerNav.currentHeight = viewerNav.baseHeight;
+  viewerNav.scale = 1.0;
+  applyViewBox();
+}
+
+function zoomViewer(factor, clientX, clientY) {
+  const svg = getViewportSvg();
+  if (!svg) return;
+
+  const newScale = Math.min(Math.max(viewerNav.scale * factor, viewerNav.minScale), viewerNav.maxScale);
+  if (Math.abs(newScale - viewerNav.scale) < 1e-4) return;
+
+  let normX = 0.5;
+  let normY = 0.5;
+  if (clientX !== undefined && clientY !== undefined && typeof svg.getBoundingClientRect === "function") {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    }
+  }
+
+  const targetSvgX = viewerNav.currentX + normX * viewerNav.currentWidth;
+  const targetSvgY = viewerNav.currentY + normY * viewerNav.currentHeight;
+
+  const newWidth = viewerNav.baseWidth / newScale;
+  const newHeight = viewerNav.baseHeight / newScale;
+
+  viewerNav.currentX = targetSvgX - normX * newWidth;
+  viewerNav.currentY = targetSvgY - normY * newHeight;
+  viewerNav.currentWidth = newWidth;
+  viewerNav.currentHeight = newHeight;
+  viewerNav.scale = newScale;
+  applyViewBox();
+}
+
+function locateIssueInViewer(issueId) {
+  if (!issueId) return;
+  const viewport = byId("drawing-viewport");
+  if (!viewport) return;
+  const svg = viewport.querySelector("svg");
+  if (!svg) return;
+  const element = svg.querySelector(`[data-issue-id="${cssEscape(issueId)}"]`);
+  if (!element) return;
+
+  let bbox = null;
+  if (typeof element.getBBox === "function") {
+    try {
+      bbox = element.getBBox();
+    } catch (_) {}
+  }
+  if (!bbox || bbox.width <= 0 || bbox.height <= 0) {
+    return;
+  }
+
+  const padding = Math.max(bbox.width, bbox.height) * 0.8 + 20;
+  const targetWidth = Math.max(bbox.width + padding * 2, viewerNav.baseWidth * 0.15);
+  const targetHeight = Math.max(bbox.height + padding * 2, viewerNav.baseHeight * 0.15);
+  const cx = bbox.x + bbox.width / 2;
+  const cy = bbox.y + bbox.height / 2;
+
+  viewerNav.currentWidth = targetWidth;
+  viewerNav.currentHeight = targetHeight;
+  viewerNav.currentX = cx - targetWidth / 2;
+  viewerNav.currentY = cy - targetHeight / 2;
+  viewerNav.scale = Math.min(Math.max(viewerNav.baseWidth / targetWidth, viewerNav.minScale), viewerNav.maxScale);
+  applyViewBox();
+}
+
+function setExpandedView(expanded) {
+  viewerNav.isExpanded = Boolean(expanded);
+  const drawingPanel = document.querySelector(".drawing-panel");
+  if (drawingPanel) {
+    drawingPanel.classList.toggle("is-expanded", viewerNav.isExpanded);
+  }
+  document.body.classList.toggle("viewer-is-expanded", viewerNav.isExpanded);
+  if (viewerExpandButton) viewerExpandButton.hidden = viewerNav.isExpanded;
+  if (viewerExitExpandButton) viewerExitExpandButton.hidden = !viewerNav.isExpanded;
+}
+
+function updateSetupSummary() {
+  const card = byId("setup-summary");
+  if (!card) return;
+  if (!state.reference) {
+    card.hidden = true;
+    const col = document.querySelector(".setup-column");
+    if (col) col.classList.remove("is-collapsed");
+    return;
+  }
+  const refName = state.reference ? state.reference.name : "—";
+  const title = (state.provisionalRubric && state.provisionalRubric.assignment_title) || "—";
+  const type = (state.provisionalRubric && state.provisionalRubric.assignment_type) || state.suggestedAssignmentType || "—";
+  const normMode = state.provisionalRubric ? placementModeLabel(state.provisionalRubric.normalization_mode) : "—";
+
+  byId("summary-reference-name").textContent = refName;
+  byId("summary-assignment-title").textContent = title;
+  byId("summary-assignment-type").textContent = type;
+  byId("summary-placement-policy").textContent = normMode;
+  card.hidden = false;
+}
+
+function setSetupCollapsed(collapsed) {
+  const col = document.querySelector(".setup-column");
+  if (!col) return;
+  col.classList.toggle("is-collapsed", collapsed);
+  if (editSetupButton) {
+    editSetupButton.textContent = collapsed ? "Edit assignment" : "Hide setup";
+    editSetupButton.setAttribute("aria-expanded", String(!collapsed));
+  }
+}
+
+function renderUnsupportedNotice(review) {
+  const banner = byId("unsupported-notice");
+  if (!banner) return;
+  const presentation = review.finding_presentation || {};
+  const summary = presentation.unsupported_summary || null;
+  const total = summary ? summary.total_count : 0;
+  if (!total) {
+    banner.hidden = true;
+    return;
+  }
+  banner.hidden = false;
+  const textEl = byId("unsupported-notice-text");
+  if (textEl) {
+    textEl.textContent = summary.notice || `${total} unsupported entities were detected and safely ignored during evaluation. Assessment scope is limited to supported 2D geometry.`;
+  }
+  const listEl = byId("unsupported-notice-list");
+  if (listEl) {
+    clearChildren(listEl);
+    (summary.groups || []).forEach((group) => {
+      const li = document.createElement("li");
+      const layers = (group.layers || []).join(", ") || "default";
+      li.textContent = `${group.source}: ${group.count} × ${group.entity_type} (Layers: ${layers})`;
+      listEl.append(li);
+    });
+  }
 }
 
 function setFilter(filter) {
@@ -1021,7 +1362,15 @@ function renderIssueList() {
     byId("issue-empty").hidden = true;
     return;
   }
-  const visible = presentedIssues(state.review).filter((issue) => state.filter === "all" || issue.visual_role === state.filter);
+  const presentation = state.review.finding_presentation || {};
+  const linkedSupporting = presentation.linked_supporting_by_primary || {};
+  const unlinkedSupportingIds = new Set(presentation.unlinked_supporting_ids || []);
+
+  const visible = presentedIssues(state.review).filter((issue) => {
+    if (state.filter !== "all" && issue.visual_role !== state.filter) return false;
+    if (!showTechnicalDetails && unlinkedSupportingIds.has(issue.issue_id)) return false;
+    return true;
+  });
   byId("issue-empty").hidden = visible.length !== 0;
   visible.forEach((issue) => {
     const button = document.createElement("button");
@@ -1047,6 +1396,18 @@ function renderIssueList() {
     const feedback = document.createElement("span");
     feedback.className = "issue-card-message";
     feedback.textContent = issue.technical_feedback;
+
+    const guidance = issue.correction_guidance;
+    const primaryCmd = guidance && guidance.primary_command ? guidance.primary_command : "";
+    if (primaryCmd) {
+      const cmdPreview = document.createElement("span");
+      cmdPreview.className = "issue-card-command-preview";
+      cmdPreview.textContent = "Action: " + primaryCmd;
+      button.append(top, feedback, cmdPreview);
+    } else {
+      button.append(top, feedback);
+    }
+
     const evidence = document.createElement("span");
     evidence.className = "issue-card-evidence";
     evidence.textContent = role === "supporting"
@@ -1056,8 +1417,29 @@ function renderIssueList() {
         : humanize(issue.severity) + " · Applied: " + formatDeduction(appliedDeduction(issue));
     const deductionDetail = document.createElement("span");
     deductionDetail.className = "issue-card-deduction";
-    deductionDetail.textContent = role === "supporting" ? "No separate deduction" : formatDeductionDetail(issue);
-    button.append(top, feedback, evidence, deductionDetail);
+    deductionDetail.textContent = role === "supporting" ? "No separate deduction" : (showTechnicalDetails ? formatDeductionDetail(issue) : ("Applied: " + formatDeduction(appliedDeduction(issue))));
+    button.append(evidence, deductionDetail);
+
+    // Linked supporting topology findings collapsible
+    const linked = linkedSupporting[issue.issue_id] || [];
+    if (linked.length > 0) {
+      const collapse = document.createElement("details");
+      collapse.className = "supporting-findings-collapse";
+      const summary = document.createElement("summary");
+      summary.textContent = `${linked.length} supporting finding(s) (no extra deduction)`;
+      collapse.append(summary);
+      const sublist = document.createElement("ul");
+      sublist.className = "supporting-findings-sublist";
+      linked.forEach((sup) => {
+        const item = document.createElement("li");
+        item.textContent = `${sup.issue_id}: ${sup.technical_feedback || humanize(sup.issue_type)}`;
+        sublist.append(item);
+      });
+      collapse.append(sublist);
+      collapse.addEventListener("click", (e) => e.stopPropagation());
+      button.append(collapse);
+    }
+
     button.addEventListener("click", () => selectIssue(issue.issue_id, true));
     list.append(button);
   });
@@ -1068,6 +1450,7 @@ function selectIssue(issueId, scrollList) {
   const issue = state.review.issues.find((item) => item.issue_id === issueId);
   if (!issue) return;
   state.selectedIssueId = issueId;
+  if (viewerLocateButton) viewerLocateButton.disabled = false;
   renderIssueList();
   document.querySelectorAll("#drawing-viewport [data-issue-id]").forEach((element) => {
     element.classList.toggle("is-selected", element.getAttribute("data-issue-id") === issueId);
@@ -1213,6 +1596,14 @@ function safeClass(value) {
 function cssEscape(value) {
   if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
   return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+}
+
+function getViewerNav() {
+  return viewerNav;
+}
+
+function getState() {
+  return state;
 }
 
 updateWeightTotal();
