@@ -580,8 +580,8 @@ fieldset legend { padding: 0 4px; }
   cursor: grabbing;
 }
 .drawing-viewport svg { display: block; width: 100%; height: 100%; }
-.drawing-viewport.student-only-view svg [data-layer="reference"],
-.drawing-viewport.student-only-view svg [data-layer="issues"] {
+.drawing-viewport.student-only-view svg > g[data-layer="reference"],
+.drawing-viewport.student-only-view svg > g[data-layer="issues"] {
   display: none;
 }
 .drawing-viewport [data-issue-id] { cursor: pointer; }
@@ -591,29 +591,19 @@ fieldset legend { padding: 0 4px; }
   stroke-width: 5px !important;
 }
 
-/* Exclusive visual role drawing filter */
-.drawing-viewport[data-active-role]:not([data-active-role="all"]):not([data-active-role="reference"]) svg [data-layer="reference"] {
+/* Applied only to individual graphics, classified from authoritative SVG roles. */
+.drawing-viewport svg .is-role-hidden {
   display: none !important;
   pointer-events: none !important;
 }
-.drawing-viewport[data-active-role]:not([data-active-role="all"]):not([data-active-role="student"]) svg [data-layer="student"] {
-  display: none !important;
-  pointer-events: none !important;
+.assessment-notices {
+  padding: 8px 16px;
+  color: var(--ink);
+  background: var(--yellow-soft);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
 }
-.drawing-viewport[data-active-role="reference"] svg [data-layer="issues"],
-.drawing-viewport[data-active-role="student"] svg [data-layer="issues"] {
-  display: none !important;
-  pointer-events: none !important;
-}
-.drawing-viewport[data-active-role="missing"] svg [data-layer="issues"] > g:not([data-role="missing"]),
-.drawing-viewport[data-active-role="extra"] svg [data-layer="issues"] > g:not([data-role="extra"]),
-.drawing-viewport[data-active-role="inaccurate"] svg [data-layer="issues"] > g:not([data-role="inaccurate"]),
-.drawing-viewport[data-active-role="connectivity"] svg [data-layer="issues"] > g:not([data-role="connectivity"]),
-.drawing-viewport[data-active-role="warning"] svg [data-layer="issues"] > g:not([data-role="warning"]),
-.drawing-viewport[data-active-role="critical"] svg [data-layer="issues"] > g:not([data-role="critical"]) {
-  display: none !important;
-  pointer-events: none !important;
-}
+.assessment-notices p { margin: 4px 0; }
 
 .legend {
   min-height: 42px;

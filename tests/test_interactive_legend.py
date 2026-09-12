@@ -87,25 +87,69 @@ def test_legend_controls_structure_and_accessibility():
 
 
 def test_drawing_role_css_filtering_rules():
-    """Verify exact visibility CSS rules for all roles including pointer-events: none."""
+    """Guard leaf-only hiding; the live QA checks actual rendered visibility."""
     css = client.get("/static/style.css").text
-
-    # Verify hiding reference and student in category modes
-    assert '.drawing-viewport[data-active-role]:not([data-active-role="all"]):not([data-active-role="reference"]) svg [data-layer="reference"]' in css
-    assert '.drawing-viewport[data-active-role]:not([data-active-role="all"]):not([data-active-role="student"]) svg [data-layer="student"]' in css
-
-    # Verify hiding issue layers in reference and student modes
-    assert '.drawing-viewport[data-active-role="reference"] svg [data-layer="issues"]' in css
-    assert '.drawing-viewport[data-active-role="student"] svg [data-layer="issues"]' in css
-
-    # Verify issue categories filtering
-    for role in ["missing", "extra", "inaccurate", "connectivity", "warning", "critical"]:
-        rule = f'.drawing-viewport[data-active-role="{role}"] svg [data-layer="issues"] > g:not([data-role="{role}"])'
-        assert rule in css
-
-    # Verify pointer-events: none on hidden layers
+    assert '.drawing-viewport svg .is-role-hidden' in css
+    assert 'svg [data-layer="reference"]' not in css
+    assert 'svg [data-layer="student"]' not in css
     assert "display: none !important" in css
     assert "pointer-events: none !important" in css
+
+
+def test_explicit_role_exposes_support_and_selection_without_mutating_review():
+    result = _run_ui_behavior('''
+    const {sandbox,getOrCreate}=createHarness();
+    const review={issues:[
+      {issue_id:'P',visual_role:'inaccurate',finding_role:'primary'},
+      {issue_id:'S',visual_role:'connectivity',finding_role:'supporting'}],
+      finding_presentation:{default_issue_ids:['P'],linked_supporting_by_primary:{P:['S']}}};
+    sandbox.getState().review=review;
+    const before=JSON.stringify(review);
+    sandbox.setActiveRole('connectivity');
+    const filtered=getOrCreate('issue-list').children.map(g=>g.children[0].dataset.issueId);
+    sandbox.selectIssue('S',false);
+    sandbox.setActiveRole('missing');
+    console.log(JSON.stringify({filtered,selected:sandbox.getState().selectedIssueId,
+      feedbackHidden:getOrCreate('feedback-detail').hidden,unchanged:before===JSON.stringify(review)}));
+    ''')
+    assert result == {'filtered':['S'], 'selected':None, 'feedbackHidden':True, 'unchanged':True}
+
+
+def test_critical_and_blocking_notices_survive_unrelated_filters():
+    result = _run_ui_behavior('''
+    const {sandbox,getOrCreate}=createHarness();
+    const review={issues:[{issue_id:'C',severity:'critical',technical_feedback:'Critical evidence',visual_role:'critical'},
+      {issue_id:'B',blocking:true,technical_feedback:'Blocking evidence',visual_role:'warning'}]};
+    sandbox.getState().review=review;
+    sandbox.renderAssessmentNotices(review);
+    sandbox.setActiveRole('missing');
+    console.log(JSON.stringify({hidden:getOrCreate('assessment-notices').hidden,
+      text:getOrCreate('assessment-notices').children.map(e=>e.textContent)}));
+    ''')
+    assert result == {'hidden':False, 'text':['C: Critical evidence','B: Blocking evidence']}
+
+
+def test_leaf_role_classification_ignores_cad_layer_names_and_nested_wrappers():
+    result = _run_ui_behavior('''
+    const {sandbox,getOrCreate}=createHarness();
+    const svg=new MockElement('','svg');
+    getOrCreate('drawing-viewport').replaceChildren(svg);
+    const reference=new MockElement('','g'); reference.setAttribute('data-layer','reference'); reference.parentElement=svg;
+    const issues=new MockElement('','g'); issues.setAttribute('data-layer','issues'); issues.parentElement=svg;
+    const wrapper=new MockElement('','g'); wrapper.parentElement=issues;
+    const role=new MockElement('','g'); role.setAttribute('data-role','inaccurate'); role.parentElement=wrapper;
+    const base=new MockElement('','line'); base.setAttribute('data-layer','student'); base.parentElement=reference;
+    const expected=new MockElement('','line'); expected.setAttribute('data-layer','reference'); expected.parentElement=role;
+    expected.closest=()=>role;
+    const actual=new MockElement('','line'); actual.setAttribute('data-layer','issues'); actual.parentElement=role;
+    actual.closest=()=>role;
+    svg.querySelectorAll=()=>[base,expected,actual];
+    sandbox.applyDrawingRoleVisibility('inaccurate');
+    const filtered=[base,expected,actual].map(e=>e.classList.contains('is-role-hidden'));
+    sandbox.applyDrawingRoleVisibility('all');
+    console.log(JSON.stringify({filtered,all:[base,expected,actual].map(e=>e.classList.contains('is-role-hidden'))}));
+    ''')
+    assert result == {'filtered':[True,False,False], 'all':[False,False,False]}
 
 
 def test_behavioral_two_way_synchronization_in_node_vm():

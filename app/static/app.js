@@ -204,7 +204,7 @@ if (typeof window !== "undefined" && window.addEventListener) {
       const panel = document.querySelector(".drawing-panel");
       const controls = Array.from(panel.querySelectorAll('button:not(:disabled), summary, [tabindex="0"]'))
         .filter((el) => el.getClientRects().length > 0);
-      const first = controls[0], last = byId("drawing-viewport") || controls[controls.length - 1];
+      const first = controls[0], last = controls[controls.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     }
@@ -423,7 +423,7 @@ function setDrawingViewMode(mode) {
   viewReviewButton.setAttribute("aria-pressed", String(!studentOnly));
   viewStudentButton.setAttribute("aria-pressed", String(studentOnly));
   byId("student-only-status").hidden = !studentOnly;
-  byId("overlay-legend").hidden = studentOnly && false; // byId("overlay-legend").hidden = studentOnly
+  byId("overlay-legend").hidden = false;
 }
 
 function resetNormalizationDecision() {
@@ -978,6 +978,7 @@ function renderResults(review) {
   renderScoreBreakdown(review, completionMode);
   renderNormalizationDecision(review);
   renderUnsupportedNotice(review);
+  renderAssessmentNotices(review);
   updateSetupSummary();
   setSetupCollapsed(true);
   const critical = review.issues.filter((issue) => isPrimaryStudentIssue(issue) && issue.severity === "critical").length;
@@ -1464,26 +1465,50 @@ function isIssueCompatibleWithRole(issue, role) {
   return issue.visual_role === role;
 }
 
+function drawingGraphics() {
+  const svg = getViewportSvg();
+  if (!svg || !svg.querySelectorAll) return [];
+  return Array.from(svg.querySelectorAll('line, polyline, polygon, path, circle, ellipse, rect, text'));
+}
+
+function graphicRole(element) {
+  const svg = getViewportSvg();
+  let layer = element;
+  while (layer && layer.parentElement !== svg) layer = layer.parentElement;
+  if (!layer || !layer.getAttribute) return null;
+  const source = layer.getAttribute('data-layer');
+  if (source === 'reference' || source === 'student') return source;
+  if (source !== 'issues') return null;
+  const issue = element.closest('[data-role]');
+  return issue ? issue.getAttribute('data-role') : null;
+}
+
+function applyDrawingRoleVisibility(role) {
+  // CAD entity data-layer values are arbitrary layer names, not viewer roles.
+  // Classify leaf graphics using the outer source group and authoritative issue role.
+  // Anonymous nested wrappers cannot hide matching descendants or leak other roles.
+  drawingGraphics().forEach((element) => {
+    element.classList.toggle('is-role-hidden', role !== 'all' && graphicRole(element) !== role);
+  });
+}
+
 function hasGraphicsForRole(role) {
   if (!state.review) return false;
-  if (role === "all") return true;
-  const svg = getViewportSvg();
-  if (!svg) return false;
-  if (role === "reference") {
-    const layer = svg.querySelector ? svg.querySelector('[data-layer="reference"]') : null;
-    return Boolean(layer && layer.children && layer.children.length > 0);
-  }
-  if (role === "student") {
-    const layer = svg.querySelector ? svg.querySelector('[data-layer="student"]') : null;
-    return Boolean(layer && layer.children && layer.children.length > 0);
-  }
-  const groups = svg.querySelectorAll ? svg.querySelectorAll(`[data-layer="issues"] g[data-role="${role}"]`) : [];
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
-    if (typeof g.getAttribute === "function" && g.getAttribute("data-geometry") === "unavailable") continue;
-    if (g.children && g.children.length > 0) return true;
-  }
-  return false;
+  return drawingGraphics().some((element) => role === 'all' || graphicRole(element) === role);
+}
+
+function renderAssessmentNotices(review) {
+  const notices = byId('assessment-notices');
+  if (!notices) return;
+  clearChildren(notices);
+  const essential = (review.issues || []).filter(issue =>
+    issue.severity === 'critical' || issue.blocks_reference || issue.blocking);
+  notices.hidden = essential.length === 0;
+  essential.forEach(issue => {
+    const item = document.createElement('p');
+    item.textContent = `${issue.issue_id}: ${issue.technical_feedback || humanize(issue.category)}`;
+    notices.append(item);
+  });
 }
 
 function updateDrawingEmptyState(role) {
@@ -1510,6 +1535,7 @@ function highlightSelectedIssueInDrawing(issueId) {
 
 function setActiveRole(role, preserveSelection = true) {
   if (!role) role = "all";
+  if (role !== state.activeRole) viewerNav.pointerIssueId = null;
   state.activeRole = role;
 
   // 1. Legend buttons: exclusive active state
@@ -1551,6 +1577,7 @@ function setActiveRole(role, preserveSelection = true) {
   }
 
   // 5. Empty indications feedback
+  applyDrawingRoleVisibility(role);
   updateDrawingEmptyState(role);
 
   // 6. Re-render Issue list (respects state.filter)
@@ -1568,6 +1595,13 @@ function setFilter(filter) {
 
 function renderIssueList() {
   const list = byId("issue-list");
+  const focused = typeof document !== 'undefined' ? document.activeElement : null;
+  const hadFocus = Boolean(focused && list.contains && list.contains(focused));
+  const focusedId = hadFocus && focused.dataset ? focused.dataset.issueId : null;
+  const focusedDisclosure = hadFocus && focused.closest ? focused.closest('details') : null;
+  const disclosureId = focusedDisclosure && focusedDisclosure.dataset.primaryIssueId;
+  const openDisclosures = new Set(Array.from(list.querySelectorAll('details[open]'))
+    .map(element => element.dataset.primaryIssueId));
   clearChildren(list);
   if (!state.review) {
     byId("issue-empty").hidden = true;
@@ -1577,7 +1611,10 @@ function renderIssueList() {
   const linkedSupporting = presentation.linked_supporting_by_primary || {};
   const issueById = new Map((state.review.issues || []).map((issue) => [issue.issue_id, issue]));
 
-  const visible = presentedIssues(state.review).filter((issue) => {
+  // An explicit role filter exposes its complete evidence, including supporting
+  // findings otherwise collapsed under a primary in the default All view.
+  const candidates = state.filter === 'all' ? presentedIssues(state.review) : state.review.issues;
+  const visible = candidates.filter((issue) => {
     if (state.filter !== "all" && issue.visual_role !== state.filter) return false;
     return true;
   });
@@ -1634,13 +1671,15 @@ function renderIssueList() {
 
     // Linked supporting topology findings collapsible
     group.append(button);
-    const linked = (linkedSupporting[issue.issue_id] || []).map((id) => issueById.get(id)).filter(Boolean);
+    const linked = (linkedSupporting[issue.issue_id] || []).map((id) => issueById.get(id))
+      .filter(sup => sup && (state.filter === 'all' || sup.visual_role === state.filter));
     if (linked.length > 0) {
       const collapse = document.createElement("details");
       collapse.className = "supporting-findings-collapse";
+      collapse.dataset.primaryIssueId = issue.issue_id;
       const summary = document.createElement("summary");
       summary.textContent = `${linked.length} supporting finding(s) - linked evidence`;
-      collapse.open = linked.some((sup) => essentialFinding(sup) || sup.issue_id === state.selectedIssueId);
+      collapse.open = openDisclosures.has(issue.issue_id) || linked.some((sup) => essentialFinding(sup) || sup.issue_id === state.selectedIssueId);
       collapse.append(summary);
       const sublist = document.createElement("ul");
       sublist.className = "supporting-findings-sublist";
@@ -1648,6 +1687,7 @@ function renderIssueList() {
         const item = document.createElement("li");
         const link = document.createElement("button");
         link.type = "button";
+        link.dataset.issueId = sup.issue_id;
         link.textContent = `${sup.issue_id}: ${sup.technical_feedback || humanize(sup.category)}`;
         link.addEventListener("click", () => selectIssue(sup.issue_id, false));
         item.append(link);
@@ -1661,6 +1701,20 @@ function renderIssueList() {
     button.addEventListener("click", () => selectIssue(issue.issue_id, true));
     list.append(group);
   });
+  if (viewerLocateButton) {
+    viewerLocateButton.disabled = !drawingGraphics().some(element => {
+      const visual = element.closest && element.closest('[data-issue-id]');
+      return visual && visual.getAttribute('data-issue-id') === state.selectedIssueId;
+    });
+  }
+  if (hadFocus) {
+    const replacement = focusedId
+      ? list.querySelector(`[data-issue-id="${cssEscape(focusedId)}"]`)
+      : disclosureId ? list.querySelector(`details[data-primary-issue-id="${cssEscape(disclosureId)}"] summary`) : null;
+    const fallback = document.querySelector(`.filters [data-filter="${cssEscape(state.filter)}"]`);
+    const target = replacement || fallback;
+    if (target && target.focus) target.focus({preventScroll: true});
+  }
 }
 
 function selectIssue(issueId, scrollList) {

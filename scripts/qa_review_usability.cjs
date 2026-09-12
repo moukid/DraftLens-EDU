@@ -86,7 +86,7 @@ function pass(name) {checks.push(name); console.log('PASS:',name);}
     assert.equal(await page.locator('#viewer-exit-expand').isVisible(),true);
     await page.locator('#viewer-zoom-in').focus();
     await page.keyboard.press('Shift+Tab');
-    assert.equal(await viewport.evaluate(el=>el===document.activeElement),true);
+    assert.equal(await page.locator('#overlay-legend [data-role="critical"]').evaluate(el=>el===document.activeElement),true);
     await page.keyboard.press('Tab');
     assert.equal(await page.locator('#viewer-zoom-in').evaluate(el=>el===document.activeElement),true);
     await page.keyboard.press('Escape');
@@ -133,8 +133,10 @@ function pass(name) {checks.push(name); console.log('PASS:',name);}
     await page.locator('#approve-rubric').click();
     await page.waitForFunction(()=>Boolean(getState().rubricId));
     for(let n=0;n<3;n++) {
+      await page.locator('#overlay-legend [data-role="missing"]').click();
       await page.locator('#run-review').click();
       await page.waitForFunction(()=>Boolean(getState().review && !getState().loading));
+      assert.equal(await page.evaluate(()=>getState().activeRole),'all');
       assert.equal(await page.evaluate(()=>getViewerNav().scale),1);
       await page.locator('#viewer-zoom-in').click();
       assert.equal(await page.evaluate(()=>getViewerNav().scale),1.25);

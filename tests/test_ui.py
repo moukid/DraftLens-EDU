@@ -113,7 +113,7 @@ def test_ui_assets_are_served_from_fastapi_static_mount():
 
 def test_page_has_no_external_or_cdn_dependencies():
     response, parser = page()
-    assert parser.assets == ["/static/style.css?v=review-usability-2", "data:,", "/static/app.js?v=review-usability-2"]
+    assert parser.assets == ["/static/style.css?v=interactive-legend-1", "data:,", "/static/app.js?v=interactive-legend-1"]
     lowered = response.text.lower()
     assert "http://" not in lowered
     assert "https://" not in lowered
@@ -130,8 +130,8 @@ def test_static_assets_share_a_deterministic_release_version():
         for asset in static_assets
     }
 
-    assert static_assets == ["/static/style.css?v=review-usability-2", "/static/app.js?v=review-usability-2"]
-    assert versions == {"review-usability-2"}
+    assert static_assets == ["/static/style.css?v=interactive-legend-1", "/static/app.js?v=interactive-legend-1"]
+    assert versions == {"interactive-legend-1"}
     assert repeated.assets == first.assets
     assert all(client.get(asset).status_code == 200 for asset in static_assets)
 
@@ -423,7 +423,7 @@ def test_student_only_view_hides_overlay_roles_but_not_original_student_layer():
     stylesheet = client.get("/static/style.css").text
     javascript = client.get("/static/app.js").text
     mode_css = stylesheet[
-        stylesheet.index('.drawing-viewport.student-only-view svg [data-layer="reference"]'):
+        stylesheet.index('.drawing-viewport.student-only-view svg > g[data-layer="reference"]'):
         stylesheet.index(".drawing-viewport [data-issue-id]")
     ]
     mode_function = javascript[
@@ -436,7 +436,7 @@ def test_student_only_view_hides_overlay_roles_but_not_original_student_layer():
     assert '[data-layer="student"]' not in mode_css
     assert "display: none" in mode_css
     assert 'classList.toggle("student-only-view", studentOnly)' in mode_function
-    assert 'byId("overlay-legend").hidden = studentOnly' in mode_function
+    assert 'byId("overlay-legend").hidden = false' in mode_function
     assert 'byId("student-only-status").hidden = !studentOnly' in mode_function
     assert 'viewReviewButton.setAttribute("aria-pressed", String(!studentOnly))' in mode_function
     assert 'viewStudentButton.setAttribute("aria-pressed", String(studentOnly))' in mode_function
