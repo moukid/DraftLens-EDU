@@ -1,5 +1,71 @@
 # Independent usability review and targeted repair
 
+## Interactive legend, findings, and header-credit audit — 2026-09-12
+
+**UI verdict: PASS — ready for MOUKID's local acceptance and the authorized feature-branch push.** Combined-release readiness remains separately pending ellipse integration and verification. Earlier release-level FAIL wording below is retained as historical evidence and does not apply to this bounded UI update.
+
+### Exact reviewed range
+
+- Actual worktree: `D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.worktrees\review-usability` (the supplied path omitted the separator before `.worktrees`).
+- Branch: `feature/review-usability-v1`; origin: `https://github.com/moukid/DraftLens-EDU.git`.
+- Exact preceding usability checkpoint: `b9ee2b87ab0e2ebc665715f5e0816b7b3d1172e6`, preserving the prior review clarification and integration plan. Previous tested usability code was `1041bea`, followed by review document commit `6e620fa` and documentation checkpoint `b9ee2b8`.
+- Complete latest submitted UI change: `fb78ffd415923d6588dfa01be920907848d013f1`, compared against `b9ee2b8`. It changes three frontend files, the handoff, and the interactive-legend tests. No additional hidden implementation commit was omitted from this comparison.
+- Final independently reviewed repair/code commit: **`0d8e302c826af0fe9fb0768ba3171d82ce3e8e41`**. A documentation-only commit follows; the final handoff records its exact hash and remote comparison.
+- The feature branch was not advertised by `git ls-remote --heads origin feature/review-usability-v1` at inspection or immediately before staging. Only a normal feature-branch push is authorized; no force-push, release merge, release publication, or issue closure.
+
+### Findings and repairs
+
+| Priority | Confirmed defect and impact | Repair / evidence |
+| --- | --- | --- |
+| P1 | CSS confused arbitrary CAD entity `data-layer` names with viewer source groups. Reference mode showed only 54 of 160 reference entities when CAD layers were named reference/student/issues; discrepancy components could disappear. | Classify individual SVG graphics by outer source group and authoritative issue `data-role`. All 160 reference and 160 student entities survive their respective filters; all 327 base/overlay graphics appear in All. |
+| P1 | Anonymous nested SVG wrappers were hidden wholesale, removing valid Inaccurate geometry. | Leaf-level visibility retains matching descendants and both expected/actual components, without allowing unrelated descendants to leak. |
+| P1 | Connectivity showed indications but an empty Findings list; selecting linked support changed role and removed its card. | Explicit role filters expose all corresponding authoritative findings, including normally collapsed evidence. Selected support remains accessible across technical-detail toggles. |
+| P1 | Critical/blocking details disappeared under unrelated filters. | Persistent, unfiltered critical/blocker notices outside the drawing and Findings list; existing unsupported-coverage notices remain visible. No assessment data is changed. |
+| P2 | Finding selection replaced the focused DOM button, losing keyboard position. | Preserve focus by issue identity, preserve open disclosure state, and fall back to the active filter only if the prior control genuinely disappears. |
+| P2 | Expanded-view focus trapping treated the viewport as the final control, skipping all legend buttons. | Use the actual final visible control; tested forward/reverse traversal through all nine legend buttons and Escape. |
+| P2 | Old asset query versions could retain stale JS/CSS; obsolete no-op/comment code obscured legend visibility. | Advance both asset versions to `interactive-legend-1`; make legend visibility explicit. |
+| P2 | Locate remained enabled for findings with no drawable geometry; pointer identity could remain stale across filters. | Derive Locate availability from drawable issue graphics and clear stale pointer identity on role changes. |
+
+Seven browser check groups failed on the submitted version before repair. Existing tests relied mostly on static CSS strings and mocked state and did not detect the rendered defects. The submitted handoff also attributed legend-specific checks to the unchanged older live script; those claims were not accepted as independent evidence. The new live script performs actual visibility, pointer, focus, screenshot, and download checks.
+
+### Actual final verification
+
+- **Full suite: 433 passed, zero failures/skips, seven existing warnings, 33.40 seconds.** Command: existing Python environment, `-B -m pytest -q -p no:cacheprovider --disable-warnings --tb=short -rN`.
+- Focused regression suite: **57 passed**, seven warnings, 6.79 seconds. Added three automated cases for role-classification collisions/wrappers, support selection/immutability, and persistent critical/blocker notices. Updated obsolete CSS/version expectations without weakening grading or report assertions.
+- New independent live-browser suite `scripts/qa_interactive_legend.cjs`: **12/12 check groups passed**. Existing `scripts/qa_review_usability.cjs`: **11/11 check groups passed**, including updated complete legend focus traversal and repeated-review reset to All.
+- Browser verification used a fresh standalone headless Microsoft Edge/Playwright session after the in-app browser bootstrap failed. No personal browser profile or teaching files were used.
+- Real dense synthetic upload: 120 reference entities, a modified student drawing, score 87 with five findings. Additional server-shaped edge-case review uses the production SVG serializer: 160 reference entities, 160 student entities, and all six issue roles, including colliding CAD layer names and a no-geometry finding. Synthetic edge-case records are not claimed as real grading outcomes.
+- All nine controls verified at 1366x768 and narrow widths 760 and 390: exact visible-graphic counts, exclusive roles, both sync directions, expected/actual discrepancy components, pointer selection, and hidden-geometry hit testing. Nested anonymous wrappers tested explicitly.
+- Verified selection/focus, supporting disclosures, technical toggles, essential notices, empty-category messages, mode-button agreement, preserved pan/zoom, full-bounds Fit, centered Locate, wheel/button/keyboard navigation, expanded view/Escape, and three repeated reviews without duplicated handlers. SVG sanitization and download-error recovery remain passing.
+- Header logo and tagline retained; exact credit is `All rights reserved to MOUKiD BADiE & Mervat El-Sawaf`. Checked direct placement, exact capitalization, desktop/narrow wrapping, and computed contrast at least 4.5:1. Screenshots inspected for legibility, overflow, unexpected clutter, and visible discrepancy components.
+- Real PDF downloads while Missing is active are byte-identical to complete exports for the same snapshot/options: standard four pages, technical five pages. The drawing page retains all eight legend roles; header credit is absent from PDF content. Rendered drawing-page inspection confirms full geometry/overlays, bounds, proportions, and readable legend. Prior unaffected comprehensive PDF-layout verification remains applicable.
+- `node --check` passed for application JS and both browser scripts; `git diff --check` passed. CAD history scan passed (52 historical commits before these two closure commits); no tracked/on-disk CAD fixtures, and all four mixed-case/nested ignore probes passed. Final post-commit policy and remote-tip checks are part of the push handoff.
+
+### Invariants and boundaries
+
+The full latest-update diff and repair diff contain no backend parser, geometry, matching, normalization, compatibility, grading, rubric, review-snapshot, PDF-generator, dependency, LICENSE, or ownership-metadata changes. Authoritative review JSON remained equal before/after restrictive-filter interaction and download. Root ellipse checkout remains at `31c94a4` with exactly its original five unstaged files; all five SHA-256 hashes match those recorded in the prior integration plan. Nothing from that checkout was imported, staged, or committed.
+
+The only production repairs are browser JS, CSS, and HTML. No #2/#5/#6/#7/#10/#11 GitHub implementation or integration was performed. Earlier handoff labels calling the legend '#2' and header credit '#5' were checklist-style labels, not changes to those deferred GitHub issues; current headings remove that ambiguity.
+
+### Reproduce and accept
+
+Use the existing loopback application at `http://127.0.0.1:8766/` when confirmed running. It was launched with explicit `--app-dir` pointing at this worktree (launcher PID 42660, child listener 43236), not the root checkout. No unrelated server was stopped.
+
+From the usability worktree, the optional live scripts require Node, Playwright, Edge, and the existing Python environment; no new application dependencies were added:
+
+```powershell
+$env:DRAFTLENS_QA_PYTHON = 'D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.venv\Scripts\python.exe'
+$env:DRAFTLENS_PLAYWRIGHT_MODULE = 'C:\Users\mouki\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+node scripts/qa_interactive_legend.cjs
+node scripts/qa_review_usability.cjs
+```
+
+Both scripts reject non-loopback URLs and print temporary artifact directories outside the repository. The current run's legend artifacts are under `C:\Users\mouki\AppData\Local\Temp\draftlens-legend-qa-ktrqsH`; these local QA artifacts are not repository fixtures or required application resources.
+
+MOUKID checklist: upload local nonconfidential files; exercise every legend/Findings category in both directions; select a finding and linked support; check zoom/pan/Fit/Locate and expanded keyboard controls; export with/without technical details while Missing is active; edit setup and confirm reapproval. Keep every DXF/DWG file outside Git.
+
+Limitations: Chromium/Edge desktop and narrow-layout checks do not certify Safari, touch hardware, or screen-reader behavior. Synthetic edge cases complement rather than replace instructor acceptance. No combined-release readiness is claimed. Rollback, only if requested, would be a reviewed revert of repair commit `0d8e302`; no history rewrite or rollback was performed.
+
 ## Status clarification — 2026-09-11 (Africa/Cairo)
 
 This dated addendum applies MOUKID's clarified scope. The original report and findings below are preserved as historical evidence; its combined-release verdict must not be read as rejection of the usability work.

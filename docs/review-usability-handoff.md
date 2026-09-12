@@ -1,5 +1,15 @@
 # DraftLens EDU — Review and UI Usability Improvements Handoff
 
+## Independent QA closure — 2026-09-12
+
+**PASS for this UI update.** Reviewed complete range `b9ee2b87ab0e2ebc665715f5e0816b7b3d1172e6..fb78ffd415923d6588dfa01be920907848d013f1`; final repaired code is `0d8e302c826af0fe9fb0768ba3171d82ce3e8e41`. The documentation-only closure commit and normal feature-branch push are recorded in the final Codex handoff. Combined release remains pending ellipse integration and verification.
+
+Independent evidence supersedes historical test claims below: **433 full-suite tests passed**, seven existing warnings; **12 new legend browser groups plus 11 preserved usability browser groups passed**. Actual rendered tests exposed and fixed CAD-layer/role collisions, nested-wrapper hiding, inaccessible supporting findings, disappearing critical/blocking details, lost selection focus, and skipped expanded-mode legend controls. Asset versions are now `interactive-legend-1`; Locate is disabled for non-drawable findings. Browser filters do not alter snapshots or PDF exports.
+
+See [the dated independent review](review-usability-review.md) for ranked findings, exact commands, screenshot/PDF evidence, source scope, privacy gates, and limitations. Run `scripts/qa_interactive_legend.cjs` for real production-SVG visibility/keyboard/pointer/export checks and `scripts/qa_review_usability.cjs` for the broader workflow. Runtime setup is documented in that review; synthetic files remain outside the repository.
+
+Only `feature/review-usability-v1` is authorized for a normal push after all final gates. No release merge, publication, deferred GitHub-issue implementation, or root ellipse change is included. The older description below is retained as implementation history; its browser test list was not treated as proof of actual legend visibility.
+
 ## Status: READY FOR CODEX REVIEW
 
 ---
@@ -11,9 +21,9 @@ This handoff documents the completed implementation and local verification of th
 - **#9: PDF readability, layout, and drawing scaling**
 - **#3: Collapse supporting topology findings**
 - **#4: Reduce unsupported-entity warning noise while preserving assessment limitations**
-- **#2: Interactive drawing legend with exclusive role filtering**
+- **Interactive drawing legend follow-up: exclusive role filtering**
 - **#3 (Follow-up): Synchronized findings filters and individual finding navigation**
-- **#5: Header credit notice for MOUKiD BADiE & Mervat El-Sawaf**
+- **Header credit notice for MOUKiD BADiE & Mervat El-Sawaf**
 - **Focused UI workflow improvements**: Compact setup summary, "Edit assignment" workflow, responsive 1366×768 viewport ergonomics, simplified issue cards with expandable details.
 
 All changes were implemented and verified locally in the isolated worktree `.worktrees/review-usability` on branch `feature/review-usability-v1`, branched from base commit `55c8d9b` (`release-candidate/draftlens-v0.3.0`).
@@ -22,7 +32,7 @@ All changes were implemented and verified locally in the isolated worktree `.wor
 
 ## 2. Detailed Technical Deliverables
 
-### A. Interactive Drawing Legend & Exclusive Filtering (#2)
+### A. Interactive Drawing Legend & Exclusive Filtering
 - **Interactive Legend Controls (`app/templates/index.html`, `app/static/style.css`, `app/static/app.js`)**:
   - Replaced static legend items with 9 clickable, keyboard-accessible `<button type="button" class="legend-filter-btn legend-{role}" data-role="{role}" aria-pressed="{true|false}">` controls:
     `All`, `Reference`, `Student`, `Missing`, `Extra`, `Inaccurate`, `Connectivity`, `Warning`, `Critical`.
@@ -53,7 +63,7 @@ All changes were implemented and verified locally in the isolated worktree `.wor
   - Selecting an issue in the issue list or drawing viewport automatically activates its authoritative `visual_role`, synchronizes the legend and findings filter buttons, highlights the finding card, and preserves viewport zoom/pan.
   - Switching legend or findings filters only deselects the currently selected issue if that issue is incompatible with the newly selected role.
 
-### C. Header Credit Notice (#5)
+### C. Header Credit Notice
 - **Header Attribution (`app/templates/index.html`, `app/static/style.css`)**:
   - Added exact credit line `<p class="header-credit">All rights reserved to MOUKiD BADiE &amp; Mervat El-Sawaf</p>` directly underneath the tagline in `.app-header`.
   - Styled with secondary text color, high contrast, non-distracting typography, and responsive word wrapping (`word-break: break-word`) for both desktop and narrow mobile displays.
