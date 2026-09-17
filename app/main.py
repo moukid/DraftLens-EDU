@@ -5,12 +5,18 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from jinja2 import Environment,FileSystemLoader,select_autoescape
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from typing import Any
 from pydantic import BaseModel, Field
 from .analysis import analyze_assignment
 from .dxf import DXFParseError,parse_dxf_bytes
 from .feedback import generate_feedback
 from .pdf_report import content_disposition, generate_pdf
+from .reference_objects import (
+    DEFAULT_CODE_MAPPINGS,
+    build_proposed_reference_objects,
+    extract_reference_markers_and_legend,
+)
 from .review_service import GradingPipelineOutput, PipelineContractError, build_review_artifacts, compatibility_message, normalization_decision, reference_fingerprint, run_grading_pipeline
 from .review_snapshot import (
     ReviewSnapshotStore, SnapshotCapacityError, SnapshotExpired, SnapshotNotFound,
@@ -26,6 +32,7 @@ app=FastAPI(title="DraftLens EDU",version="0.2.0"); app.mount("/static",StaticFi
 RUBRICS: dict[str, Rubric] = {}
 REFERENCE_RUBRICS: dict[str, str] = {}
 RUBRIC_REFERENCES: dict[str, str] = {}
+REFERENCE_OBJECTS: dict[str, list[dict[str, Any]]] = {}
 REVIEW_SNAPSHOTS = ReviewSnapshotStore()
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +48,15 @@ class UploadedPipelineResult:
 class RubricApprovalRequest(BaseModel):
     reference_id: str = Field(min_length=64, max_length=64)
     rubric: Rubric
+
+
+class ObjectConfirmationRequest(BaseModel):
+    reference_id: str = Field(min_length=64, max_length=64)
+    objects: list[dict[str, Any]]
+    legend_config: dict[str, Any] | None = None
+
+
+ObjectConfirmationRequest.model_rebuild()
 
 def render(name,**ctx): return templates.get_template(name).render(**ctx)
 async def read_upload(f:UploadFile):
@@ -70,6 +86,8 @@ async def run_uploaded_pipeline(
 ):
     reference_bytes = await read_upload(reference)
     student_bytes = await read_upload(student)
+    ref_id = reference_fingerprint(reference_bytes)
+    confirmed_objects = REFERENCE_OBJECTS.get(ref_id)
     if rubric and rubric.filename:
         raise HTTPException(409, "Inline rubric uploads are no longer accepted. Approve and associate the rubric before grading.")
     try:
@@ -87,6 +105,7 @@ async def run_uploaded_pipeline(
             reference_rubrics=REFERENCE_RUBRICS,
             rubric_references=RUBRIC_REFERENCES,
             instructor_override=instructor_override,
+            confirmed_reference_objects=confirmed_objects,
         )
         return UploadedPipelineResult(
             output=output,
@@ -144,6 +163,12 @@ async def grade(
         **output.scale_diagnostic.to_dict(),
         **rubric_contract(output.rubric),
     })
+    if output.unit_scale_review:
+        result["unit_scale_review"] = output.unit_scale_review.to_dict()
+    if output.reference_objects_summary is not None:
+        result["reference_objects_summary"] = output.reference_objects_summary
+    if output.student_object_correspondence is not None:
+        result["student_object_correspondence"] = output.student_object_correspondence
     if output.compatibility.grading_withheld:
         message = compatibility_message(output)
         result["compatibility_message"] = message
@@ -224,24 +249,82 @@ def download_pdf_report(
     )
 @app.post("/api/reference/validate")
 async def reference_validate(reference: UploadFile = File(...)):
-    drawing = parse_dxf_bytes(await read_upload(reference), source="reference")
+    drawing = parse_dxf_bytes(await read_upload(reference), source="reference", exclude_info_layers=True)
     return {"validation": validate_reference(drawing), "reference": drawing.to_dict()}
 
 @app.post("/api/assignment/analyze")
 async def assignment_analyze(reference: UploadFile = File(...)):
-    drawing = parse_dxf_bytes(await read_upload(reference), source="reference")
+    drawing = parse_dxf_bytes(await read_upload(reference), source="reference", exclude_info_layers=True)
     return analyze_assignment(drawing)
+
+@app.post("/api/reference/objects/inspect")
+async def reference_objects_inspect(
+    reference: UploadFile = File(...),
+    legend_bbox: str | None = Form(None),
+):
+    reference_bytes = await read_upload(reference)
+    ref_id = reference_fingerprint(reference_bytes)
+
+    legend_region = None
+    if legend_bbox:
+        try:
+            parts = [float(x.strip()) for x in legend_bbox.split(",")]
+            if len(parts) == 4:
+                legend_region = (parts[0], parts[1], parts[2], parts[3])
+        except Exception:
+            legend_region = None
+
+    full_drawing = parse_dxf_bytes(reference_bytes, source="reference", normalize=False, exclude_info_layers=False)
+    base_drawing = parse_dxf_bytes(reference_bytes, source="reference", normalize=False, exclude_info_layers=True)
+
+    plan_markers, legend_markers, meta = extract_reference_markers_and_legend(
+        full_drawing.entities,
+        full_drawing.unsupported_entities,
+        legend_region_bbox=legend_region,
+    )
+    objects, summary = build_proposed_reference_objects(
+        plan_markers,
+        base_drawing.entities,
+    )
+    return {
+        "reference_id": ref_id,
+        "declared_units": full_drawing.units,
+        "units_code": full_drawing.units_code,
+        "plan_markers": [m.to_dict() for m in plan_markers],
+        "legend_markers": [m.to_dict() for m in legend_markers],
+        "objects": [o.to_dict() for o in objects],
+        "summary": summary,
+        "metadata": meta,
+        "legend_region_applied": legend_region,
+    }
+
+@app.post("/api/reference/objects/confirm")
+def reference_objects_confirm(request: ObjectConfirmationRequest):
+    REFERENCE_OBJECTS[request.reference_id] = request.objects
+    confirmed_count = sum(o.get("status") == "confirmed" for o in request.objects)
+    unresolved_count = sum(o.get("status") == "unresolved" for o in request.objects)
+    excluded_count = sum(o.get("status") == "excluded" for o in request.objects)
+    return {
+        "status": "ok",
+        "reference_id": request.reference_id,
+        "total_objects": len(request.objects),
+        "confirmed_count": confirmed_count,
+        "unresolved_count": unresolved_count,
+        "excluded_count": excluded_count,
+    }
 
 @app.post("/api/rubric/suggest")
 async def rubric_suggest(reference: UploadFile = File(...)):
     reference_bytes = await read_upload(reference)
-    drawing = parse_dxf_bytes(reference_bytes, source="reference")
+    drawing = parse_dxf_bytes(reference_bytes, source="reference", exclude_info_layers=True)
     analysis = analyze_assignment(drawing)
     assignment_title = suggest_assignment_title(reference.filename)
+    intended_unit = drawing.units if drawing.units in {"mm", "cm", "m", "in", "ft"} else "unspecified"
     suggested_rubric = default_rubric().model_copy(
         update={
             "assignment_title": assignment_title,
             "normalization_mode": "strict",
+            "intended_unit": intended_unit,
         }
     )
     return {
@@ -252,6 +335,9 @@ async def rubric_suggest(reference: UploadFile = File(...)):
         "detected_features": analysis["detected_features"],
         "completion_scoring_mode": suggested_rubric.completion_scoring_mode,
         "normalization_mode": suggested_rubric.normalization_mode,
+        "declared_units": drawing.units,
+        "units_code": drawing.units_code,
+        "intended_unit": intended_unit,
         "rubric": suggested_rubric.model_dump(),
         "provisional": True,
         "requires_instructor_approval": True,

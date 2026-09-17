@@ -1138,3 +1138,175 @@ body.viewer-is-expanded {
   .legend { gap: 8px 12px; }
   .evidence-list div { grid-template-columns: 90px minmax(0, 1fr); }
 }
+
+/* Reference Object Tagging & Unit Scale Review */
+.reference-objects-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.legend-filter-box {
+  margin: 10px 0;
+  padding: 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.warning-banner {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-sm);
+  color: #92400e;
+  font-size: 0.85rem;
+}
+.reference-objects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 10px 0;
+}
+.reference-object-card {
+  padding: 8px 10px;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.reference-object-card.is-unresolved {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.reference-object-card.is-excluded {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+.reference-object-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.reference-object-actions {
+  display: flex;
+  gap: 6px;
+}
+.compact-button {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+}
+
+/* Unit Setting & Geometry Scale Warning Card */
+.unit-scale-card {
+  margin-bottom: 14px;
+  border-left: 4px solid #f59e0b;
+  background: #fffbeb;
+  padding: 16px;
+}
+.unit-scale-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.unit-scale-header h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.unit-scale-explanation {
+  font-size: 0.95rem;
+  color: #78350f;
+  margin: 0 0 12px 0;
+  font-weight: 500;
+}
+.unit-scale-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0 0 12px 0;
+}
+.unit-scale-grid div {
+  background: rgba(255, 255, 255, 0.7);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+.unit-scale-grid dt {
+  font-size: 0.75rem;
+  color: #92400e;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.unit-scale-grid dd {
+  margin: 2px 0 0 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #451a03;
+}
+.unit-scale-ack-box {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: #fef3c7;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* Architectural Object Correspondence Card */
+.object-correspondence-card {
+  margin-bottom: 14px;
+  padding: 16px;
+}
+.table-container {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+.correspondence-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.correspondence-table th {
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--surface-subtle);
+  border-bottom: 2px solid var(--border);
+  font-weight: 600;
+}
+.correspondence-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.correspondence-table tr:hover {
+  background: var(--surface-subtle);
+}
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.status-badge.badge-present {
+  background: #d1fae5;
+  color: #065f46;
+}
+.status-badge.badge-partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+.status-badge.badge-missing {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.status-badge.badge-uncertain {
+  background: #e0e7ff;
+  color: #3730a3;
+}

@@ -12,9 +12,11 @@ from .grading_adjustments import apply_acceptance_scoring
 from .dxf import parse_dxf_bytes
 from .models import Drawing
 from .reviewed_dxf import ReviewedDrawing, build_reviewed_drawing
+from .reference_objects import ReferenceObject, evaluate_student_object_correspondence
 from .rubric import Rubric, ToleranceProfile, default_rubric, rubric_contract
 from .scale_diagnostics import ScaleDiagnostic, diagnose_uniform_scale
 from .svg_renderer import render_svg
+from .unit_scale_review import UnitScaleReviewResult, evaluate_unit_scale_review
 from .validator import validate_reference
 
 
@@ -41,6 +43,9 @@ class GradingPipelineOutput:
     comparison: dict[str, Any]
     compatibility: CompatibilityResult
     scale_diagnostic: ScaleDiagnostic
+    unit_scale_review: UnitScaleReviewResult | None = None
+    reference_objects_summary: dict[str, Any] | None = None
+    student_object_correspondence: list[dict[str, Any]] | None = None
 
     @property
     def rubric_selection(self) -> dict[str, str | None]:
@@ -72,6 +77,7 @@ def run_grading_pipeline(
     reference_rubrics: Mapping[str, str],
     rubric_references: Mapping[str, str],
     instructor_override: bool = False,
+    confirmed_reference_objects: list[dict[str, Any]] | None = None,
 ) -> GradingPipelineOutput:
     """Run the shared deterministic selection, parsing, validation, and grading path."""
 
@@ -108,7 +114,12 @@ def run_grading_pipeline(
             f"Normalization mode '{selected_rubric.normalization_mode}' is not implemented in V1 foundation grading.",
         )
     normalize = selected_rubric.normalization_mode == "translation"
-    reference = parse_dxf_bytes(reference_bytes, source="reference", normalize=normalize)
+    reference = parse_dxf_bytes(
+        reference_bytes,
+        source="reference",
+        normalize=normalize,
+        exclude_info_layers=True,
+    )
     student = parse_dxf_bytes(student_bytes, source="student", normalize=normalize, allow_empty=True)
     validation = validate_reference(reference)
     assignment_analysis = analyze_assignment(reference)
@@ -121,6 +132,48 @@ def run_grading_pipeline(
         scale_diagnostic,
         instructor_override=instructor_override,
     )
+    unit_scale_review = evaluate_unit_scale_review(
+        reference,
+        student,
+        scale_diagnostic,
+        intended_unit=selected_rubric.intended_unit,
+        intended_unit_confirmed=selected_rubric.intended_unit_confirmed,
+        instructor_acknowledged=instructor_override,
+    )
+
+    ref_obj_summary = None
+    stu_obj_corr = None
+    if confirmed_reference_objects is not None:
+        ref_objs = [
+            ReferenceObject(
+                occurrence_id=o["occurrence_id"],
+                type_code=o["type_code"],
+                meaning=o["meaning"],
+                marker_location=tuple(o["marker_location"]),
+                member_entity_ids=list(o.get("member_entity_ids", [])),
+                member_handles=list(o.get("member_handles", [])),
+                bounds=tuple(o["bounds"]) if o.get("bounds") else None,
+                status=o.get("status", "confirmed"),
+                notes=o.get("notes", ""),
+            )
+            for o in confirmed_reference_objects
+        ]
+        stu_obj_corr = [
+            c.to_dict()
+            for c in evaluate_student_object_correspondence(ref_objs, comparison.get("matches", []))
+        ]
+        ref_obj_summary = {
+            "total_objects": len(ref_objs),
+            "confirmed_count": sum(o.status == "confirmed" for o in ref_objs),
+            "unresolved_count": sum(o.status == "unresolved" for o in ref_objs),
+            "excluded_count": sum(o.status == "excluded" for o in ref_objs),
+            "assessment_state": (
+                "available"
+                if any(o.status == "confirmed" for o in ref_objs)
+                else "incomplete_or_unavailable"
+            ),
+        }
+
     apply_acceptance_scoring(comparison, selected_rubric, compatibility)
     if compatibility.grading_withheld:
         comparison = _withheld_comparison(comparison, selected_rubric)
@@ -137,6 +190,9 @@ def run_grading_pipeline(
         comparison=comparison,
         compatibility=compatibility,
         scale_diagnostic=scale_diagnostic,
+        unit_scale_review=unit_scale_review,
+        reference_objects_summary=ref_obj_summary,
+        student_object_correspondence=stu_obj_corr,
     )
 
 def _withheld_comparison(
@@ -387,6 +443,12 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         },
         "svg": render_svg(reviewed),
     }
+    if output.unit_scale_review:
+        response["unit_scale_review"] = output.unit_scale_review.to_dict()
+    if output.reference_objects_summary is not None:
+        response["reference_objects_summary"] = output.reference_objects_summary
+    if output.student_object_correspondence is not None:
+        response["student_object_correspondence"] = output.student_object_correspondence
     if output.compatibility.instructor_override:
         response["compatibility_message"] = compatibility_message(output)
         response["compatibility_override"] = {

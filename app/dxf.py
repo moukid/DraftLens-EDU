@@ -4,6 +4,7 @@ from pathlib import Path
 import ezdxf
 from ezdxf.lldxf.const import DXFStructureError
 from .models import Drawing, Entity
+from .reference_objects import is_info_layer
 
 class DXFParseError(ValueError):
     pass
@@ -38,7 +39,14 @@ def _finish(entity):
         entity.centroid = (sum(xs)/len(xs), sum(ys)/len(ys))
     return entity
 
-def parse_dxf_bytes(data: bytes, source: str = "reference", normalize: bool = True, allow_empty: bool = False) -> Drawing:
+def parse_dxf_bytes(
+    data: bytes,
+    source: str = "reference",
+    normalize: bool = True,
+    allow_empty: bool = False,
+    exclude_info_layers: bool = False,
+    custom_info_layers: set[str] | None = None,
+) -> Drawing:
     if not data:
         raise DXFParseError("The uploaded DXF is empty.")
     for encoding in ("utf-8-sig", "cp1252"):
@@ -89,26 +97,45 @@ def parse_dxf_bytes(data: bytes, source: str = "reference", normalize: bool = Tr
                 measurement = None
             entity = Entity(kind="dimension", points=points, text=str(raw.dxf.text or ""), measurement=measurement, **base)
         else:
-            unsupported.append({"entity_type": kind, "handle": str(raw.dxf.handle), "layer": str(raw.dxf.layer)})
+            rec = {"entity_type": kind, "handle": str(raw.dxf.handle), "layer": str(raw.dxf.layer)}
+            if raw.dxf.hasattr("insert"):
+                try:
+                    rec["insert"] = _xy(raw.dxf.insert)
+                except Exception:
+                    pass
+            unsupported.append(rec)
         if entity:
             entities.append(_finish(entity))
-    if not entities:
+
+    info_entities: list[Entity] = []
+    assessable: list[Entity] = []
+    for entity in entities:
+        if exclude_info_layers and source == "reference" and is_info_layer(entity.layer, custom_info_layers):
+            info_entities.append(entity)
+        else:
+            assessable.append(entity)
+
+    if not assessable:
         if not allow_empty:
-            raise DXFParseError("The DXF contains no supported model-space entities.")
+            raise DXFParseError("The DXF contains no assessable geometry outside information layers." if info_entities else "The DXF contains no supported model-space entities.")
         code = int(doc.header.get("$INSUNITS", 0) or 0)
         return Drawing(
             [], (0.0, 0.0, 0.0, 0.0), units=UNITS.get(code, f"code-{code}"),
             units_code=code, unsupported_entities=unsupported,
             normalization={"mode": "strict", "translation": [0, 0], "rotation_degrees": 0, "scale": 1},
+            info_entities=[e.to_dict() for e in info_entities],
         )
     code = int(doc.header.get("$INSUNITS", 0) or 0)
-    drawing = normalize_drawing(entities) if normalize else _drawing(entities)
+    drawing = normalize_drawing(assessable) if normalize else _drawing(assessable)
     drawing.units_code, drawing.units = code, UNITS.get(code, f"code-{code}")
     drawing.unsupported_entities = unsupported
+    drawing.info_entities = [e.to_dict() for e in info_entities]
     return drawing
 
 def _drawing(entities):
     boxes = [e.bbox for e in entities if e.bbox]
+    if not boxes:
+        return Drawing(entities, (0.0, 0.0, 0.0, 0.0), normalization={"mode": "strict", "translation": [0, 0], "rotation_degrees": 0, "scale": 1})
     bbox = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
     return Drawing(entities, tuple(round(x, 6) for x in bbox), normalization={"mode": "strict", "translation": [0, 0], "rotation_degrees": 0, "scale": 1})
 

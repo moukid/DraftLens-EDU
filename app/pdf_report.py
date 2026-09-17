@@ -531,6 +531,20 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
         ]))
         story.extend([notice_cell, Spacer(1, 3)])
 
+    unit_review = response.get("unit_scale_review") or {}
+    if unit_review.get("prominent_notice"):
+        unit_msg = unit_review["prominent_notice"]
+        unit_cell = Table([[_p(unit_msg, styles["callout"])]], colWidths=[width])
+        unit_cell.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#ebf8ff")),
+            ("BOX", (0, 0), (-1, -1), .5, colors.HexColor("#3182ce")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.extend([unit_cell, Spacer(1, 3)])
+
     story.append(_p("Score breakdown", styles["h1"]))
     breakdown_rows = [[
         _p("Category", styles["small"]),
@@ -651,6 +665,34 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
         story.append(_p("Informational findings", styles["h1"]))
         for issue in informational:
             story.append(KeepTogether(_issue_story(issue, styles, width)))
+
+    object_correspondence = response.get("student_object_correspondence") or []
+    if object_correspondence:
+        story.append(_p("Architectural object correspondence (Preview)", styles["h1"]))
+        obj_rows = [[
+            _p("Occurrence ID", styles["small"]),
+            _p("Object type", styles["small"]),
+            _p("Status", styles["small"]),
+            _p("Details", styles["small"]),
+        ]]
+        for oc in object_correspondence:
+            obj_rows.append([
+                _p(oc.get("occurrence_id", ""), styles["body"]),
+                _p(f"{oc.get('type_code', '')} ({oc.get('meaning', '')})", styles["body"]),
+                _p(oc.get("status", "").title(), styles["body"]),
+                _p(oc.get("explanation", ""), styles["small"]),
+            ])
+        obj_table = Table(obj_rows, colWidths=[width * .22, width * .28, width * .18, width * .32], repeatRows=1)
+        obj_table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), .35, colors.HexColor("#cbd5d1")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#edf3f0")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.extend([obj_table, Spacer(1, 4)])
 
     # --- OPTIONAL TECHNICAL APPENDIX ---
     if include_appendix:

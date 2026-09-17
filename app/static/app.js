@@ -22,6 +22,10 @@ const state = {
   activeRole: "all",
   viewMode: "review",
   loading: false,
+  referenceObjects: [],
+  referenceObjectsSummary: null,
+  referenceObjectsConfirmed: false,
+  declaredUnits: null,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -31,6 +35,9 @@ const fallbackInput = byId("fallback-mode");
 const completionPolicyInput = byId("completion-scoring-mode");
 const normalizationModeInput = byId("normalization-mode");
 const assignmentTypeInput = byId("assignment-type");
+const intendedUnitInput = byId("intended-unit");
+const confirmObjectsButton = byId("confirm-reference-objects");
+const applyLegendFilterButton = byId("apply-legend-filter");
 const ruleBasedOption = completionPolicyInput.querySelector('option[value="rule_based"]');
 ruleBasedOption.textContent = "Rule-based completion";
 const approveButton = byId("approve-rubric");
@@ -115,6 +122,31 @@ byId("assignment-title").addEventListener("input", (event) => {
   state.provisionalRubric.assignment_title = event.target.value;
   markRubricDirty();
 });
+if (intendedUnitInput) {
+  intendedUnitInput.addEventListener("change", () => {
+    if (!state.provisionalRubric) return;
+    state.provisionalRubric.intended_unit = intendedUnitInput.value;
+    state.provisionalRubric.intended_unit_confirmed = intendedUnitInput.value !== "unspecified";
+    markRubricDirty();
+  });
+}
+if (confirmObjectsButton) {
+  confirmObjectsButton.addEventListener("click", confirmReferenceObjects);
+}
+if (applyLegendFilterButton) {
+  applyLegendFilterButton.addEventListener("click", async () => {
+    if (!state.reference) return;
+    const bboxVal = (byId("legend-bbox-input")?.value || "").trim();
+    const form = uploadForm("reference", state.reference);
+    if (bboxVal) form.append("legend_bbox", bboxVal);
+    try {
+      const resp = await requestJson("/api/reference/objects/inspect", {method: "POST", body: form});
+      renderReferenceObjects(resp);
+    } catch (err) {
+      showError(err);
+    }
+  });
+}
 document.querySelectorAll("[data-tolerance]").forEach((input) => {
   input.addEventListener("input", () => {
     if (!state.provisionalRubric) return;
@@ -385,6 +417,10 @@ function resetReview() {
   byId("report-status").textContent = "Generate a review to enable its authoritative report.";
   const unsupportedNotice = byId("unsupported-notice");
   if (unsupportedNotice) unsupportedNotice.hidden = true;
+  const unitScaleCard = byId("unit-scale-warning-card");
+  if (unitScaleCard) unitScaleCard.hidden = true;
+  const objCorrCard = byId("object-correspondence-card");
+  if (objCorrCard) objCorrCard.hidden = true;
   const emptyOverlay = byId("drawing-empty-overlay");
   if (emptyOverlay) emptyOverlay.hidden = true;
   resetViewerNav();
@@ -544,19 +580,27 @@ async function inspectReference(file) {
   byId("validation-message").textContent = "Running deterministic validation and assignment analysis.";
 
   try {
-    const [validationResponse, analysis, suggestion] = await Promise.all([
+    const [validationResponse, analysis, suggestion, objectsResponse] = await Promise.all([
       requestJson("/api/reference/validate", {method: "POST", body: uploadForm("reference", file)}, REFERENCE_ANALYSIS_TIMEOUT_MS),
       requestJson("/api/assignment/analyze", {method: "POST", body: uploadForm("reference", file)}, REFERENCE_ANALYSIS_TIMEOUT_MS),
       requestJson("/api/rubric/suggest", {method: "POST", body: uploadForm("reference", file)}, REFERENCE_ANALYSIS_TIMEOUT_MS),
+      requestJson("/api/reference/objects/inspect", {method: "POST", body: uploadForm("reference", file)}).catch(() => null),
     ]);
     const validation = validationResponse.validation;
     state.referenceId = suggestion.reference_id;
     state.referenceCanContinue = Boolean(validation.can_continue);
     state.suggestedAssignmentType = suggestion.suggested_assignment_type || analysis.suggested_assignment_type;
     state.provisionalRubric = JSON.parse(JSON.stringify(suggestion.rubric));
+    state.declaredUnits = suggestion.declared_units || (objectsResponse && objectsResponse.declared_units) || null;
     renderValidation(validation);
     renderAnalysis(analysis, validation);
     renderRubricEditor();
+    if (objectsResponse) {
+      renderReferenceObjects(objectsResponse);
+    } else {
+      const refObjPanel = byId("reference-objects-panel");
+      if (refObjPanel) refObjPanel.hidden = true;
+    }
     setWorkflowStatus(
       validation.can_continue ? "Reference ready for rubric approval" : "Reference has critical issues",
       validation.can_continue ? "success" : "danger"
@@ -743,6 +787,13 @@ function renderRubricEditor() {
     const input = document.querySelector("[data-tolerance='" + key + "']");
     if (input) input.value = String(value);
   });
+  if (intendedUnitInput) {
+    intendedUnitInput.value = rubric.intended_unit || "unspecified";
+  }
+  const declaredEl = byId("reference-declared-units");
+  if (declaredEl) {
+    declaredEl.textContent = state.declaredUnits || (rubric && rubric.intended_unit) || "unspecified";
+  }
   byId("rubric-status").textContent = state.referenceCanContinue
     ? "Instructor approval is required before review."
     : "Correct critical reference issues before approving this rubric.";
@@ -813,6 +864,10 @@ function markRubricDirty() {
 
 async function approveRubric() {
   if (!state.provisionalRubric || !state.referenceId || approveButton.disabled) return;
+  if (intendedUnitInput && state.provisionalRubric) {
+    state.provisionalRubric.intended_unit = intendedUnitInput.value;
+    state.provisionalRubric.intended_unit_confirmed = intendedUnitInput.value !== "unspecified";
+  }
   hideError();
   setLoading(true, "approval");
   setWorkflowStatus("Approving rubric", "working");
@@ -979,6 +1034,8 @@ function renderResults(review) {
   renderNormalizationDecision(review);
   renderUnsupportedNotice(review);
   renderAssessmentNotices(review);
+  renderUnitScaleReview(review);
+  renderObjectCorrespondence(review);
   updateSetupSummary();
   setSetupCollapsed(true);
   const critical = review.issues.filter((issue) => isPrimaryStudentIssue(issue) && issue.severity === "critical").length;
@@ -1082,6 +1139,190 @@ function renderNormalizationDecision(review) {
   const reason = decision.rejection_reason || "";
   byId("result-transform-reason-row").hidden = decision.transform_applied || !reason;
   byId("result-transform-reason").textContent = reason ? humanize(reason) : "—";
+}
+
+function renderUnitScaleReview(review) {
+  const card = byId("unit-scale-warning-card");
+  if (!card) return;
+  const unitReview = review.unit_scale_review;
+  if (!unitReview || (!unitReview.prominent_notice && unitReview.state === "matching_and_consistent")) {
+    card.hidden = true;
+    return;
+  }
+
+  card.hidden = false;
+  const chip = byId("unit-scale-state-chip");
+  if (chip) {
+    chip.textContent = humanize(unitReview.state || "Unit Review");
+    chip.className = "status-pill " + (unitReview.prominent_notice ? "warning" : "neutral");
+  }
+
+  const expl = byId("unit-scale-explanation");
+  if (expl) expl.textContent = unitReview.explanation || "";
+
+  byId("unit-scale-ref-units").textContent = unitReview.reference_declared_units || "unspecified";
+  byId("unit-scale-stu-units").textContent = unitReview.student_declared_units || "unspecified";
+  byId("unit-scale-intended-units").textContent = unitReview.intended_unit || "unspecified";
+  byId("unit-scale-factor").textContent = unitReview.geometric_scale_factor
+    ? formatNumber(unitReview.geometric_scale_factor) + "x"
+    : "Not detected";
+
+  const ackBox = byId("unit-scale-ack-box");
+  if (ackBox) {
+    ackBox.hidden = !unitReview.requires_instructor_acknowledgment;
+  }
+}
+
+function renderObjectCorrespondence(review) {
+  const card = byId("object-correspondence-card");
+  if (!card) return;
+  const corr = review.student_object_correspondence;
+  if (!Array.isArray(corr) || corr.length === 0) {
+    card.hidden = true;
+    return;
+  }
+
+  card.hidden = false;
+  byId("correspondence-summary-count").textContent = `${corr.length} confirmed object(s)`;
+
+  const tbody = byId("correspondence-table-body");
+  clearChildren(tbody);
+
+  corr.forEach((item) => {
+    const tr = document.createElement("tr");
+
+    const tdOcc = document.createElement("td");
+    tdOcc.textContent = item.occurrence_id;
+    tdOcc.style.fontWeight = "600";
+    tr.append(tdOcc);
+
+    const tdType = document.createElement("td");
+    tdType.textContent = `${item.meaning} (${item.type_code})`;
+    tr.append(tdType);
+
+    const tdStatus = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = `status-badge badge-${item.status}`;
+    badge.textContent = item.status;
+    tdStatus.append(badge);
+    tr.append(tdStatus);
+
+    const tdMembers = document.createElement("td");
+    tdMembers.textContent = String(item.total_members);
+    tr.append(tdMembers);
+
+    const tdMatched = document.createElement("td");
+    tdMatched.textContent = String(item.matched_members);
+    tr.append(tdMatched);
+
+    const tdDetails = document.createElement("td");
+    tdDetails.textContent = item.explanation || "—";
+    tr.append(tdDetails);
+
+    tbody.append(tr);
+  });
+}
+
+function renderReferenceObjects(data) {
+  const panel = byId("reference-objects-panel");
+  if (!panel) return;
+  const objects = data && data.objects ? data.objects : [];
+  const planMarkers = data && data.plan_markers ? data.plan_markers : [];
+  const legendMarkers = data && data.legend_markers ? data.legend_markers : [];
+  const summary = data && data.summary ? data.summary : null;
+
+  state.referenceObjects = objects;
+  state.referenceObjectsSummary = summary;
+  state.referenceObjectsConfirmed = false;
+
+  if (planMarkers.length === 0 && legendMarkers.length === 0 && objects.length === 0) {
+    panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  byId("reference-objects-count").textContent = String(objects.length);
+  byId("reference-objects-description").textContent =
+    `Detected ${planMarkers.length} plan marker(s) and ${legendMarkers.length} legend sample(s).`;
+
+  const legendFilter = byId("reference-objects-legend-filter");
+  if (legendFilter) {
+    legendFilter.hidden = false;
+  }
+
+  const overlapWarning = byId("overlapping-members-warning");
+  if (overlapWarning) {
+    overlapWarning.hidden = !(summary && summary.has_overlapping_memberships);
+  }
+
+  const list = byId("reference-objects-list");
+  clearChildren(list);
+
+  objects.forEach((obj) => {
+    const card = document.createElement("div");
+    card.className = "reference-object-card " + (obj.status === "unresolved" ? "is-unresolved" : obj.status === "excluded" ? "is-excluded" : "");
+
+    const meta = document.createElement("div");
+    meta.className = "reference-object-meta";
+
+    const title = document.createElement("strong");
+    title.textContent = `${obj.occurrence_id} (${obj.meaning})`;
+    meta.append(title);
+
+    const detail = document.createElement("span");
+    detail.textContent = `${obj.member_entity_ids.length} member entity(ies) proposed. Status: ${obj.status}.`;
+    if (obj.shared_entity_ids && obj.shared_entity_ids.length > 0) {
+      detail.textContent += ` [Shared geometry warning: ${obj.shared_entity_ids.length} shared entity(ies)]`;
+      detail.style.color = "#b45309";
+    }
+    meta.append(detail);
+    card.append(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "reference-object-actions";
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "secondary-button compact-button";
+    toggleBtn.textContent = obj.status === "excluded" ? "Include" : "Exclude";
+    toggleBtn.addEventListener("click", () => {
+      obj.status = obj.status === "excluded" ? "proposed" : "excluded";
+      renderReferenceObjects({objects, plan_markers: planMarkers, legend_markers: legendMarkers, summary});
+    });
+    actions.append(toggleBtn);
+    card.append(actions);
+
+    list.append(card);
+  });
+
+  byId("confirm-objects-status").textContent = "Review candidate objects and confirm before grading.";
+}
+
+async function confirmReferenceObjects() {
+  if (!state.referenceId || !state.referenceObjects.length) return;
+  const statusEl = byId("confirm-objects-status");
+  statusEl.textContent = "Confirming architectural objects...";
+  try {
+    state.referenceObjects.forEach((obj) => {
+      if (obj.status !== "excluded") {
+        obj.status = "confirmed";
+      }
+    });
+
+    const resp = await requestJson("/api/reference/objects/confirm", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        reference_id: state.referenceId,
+        objects: state.referenceObjects,
+      }),
+    });
+    state.referenceObjectsConfirmed = true;
+    statusEl.textContent = `Confirmed ${resp.confirmed_count} architectural object(s).`;
+    setWorkflowStatus("Architectural objects confirmed", "success");
+  } catch (err) {
+    statusEl.textContent = "Failed to confirm objects: " + err.message;
+  }
 }
 
 function findingRole(issue) {

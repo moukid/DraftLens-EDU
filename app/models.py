@@ -48,9 +48,10 @@ class Drawing:
     units_code: int = 0
     unsupported_entities: list[dict[str, Any]] = field(default_factory=list)
     normalization: dict[str, Any] = field(default_factory=dict)
+    info_entities: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"entities": [e.to_dict() for e in self.entities], "bbox": self.bbox, "units": self.units, "unsupported_entities": self.unsupported_entities, "normalization": self.normalization}
+        return {"entities": [e.to_dict() for e in self.entities], "bbox": self.bbox, "units": self.units, "unsupported_entities": self.unsupported_entities, "normalization": self.normalization, "info_entities": self.info_entities}
 
 @dataclass(slots=True)
 class Issue:

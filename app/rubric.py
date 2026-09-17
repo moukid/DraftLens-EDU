@@ -82,6 +82,8 @@ class Rubric(BaseModel):
     ] = "baseline_template"
     rubric_template_name: str = BASELINE_RUBRIC_TEMPLATE
     rubric_modified_by_instructor: bool = False
+    intended_unit: str = "unspecified"
+    intended_unit_confirmed: bool = False
 
     @model_validator(mode="after")
     def weights_total_100(self) -> "Rubric":
@@ -145,6 +147,8 @@ def rubric_contract(rubric: Rubric) -> dict[str, object]:
         "rubric_source": rubric.rubric_source,
         "rubric_template_name": rubric.rubric_template_name,
         "rubric_modified_by_instructor": rubric.rubric_modified_by_instructor,
+        "intended_unit": rubric.intended_unit,
+        "intended_unit_confirmed": rubric.intended_unit_confirmed,
         "category_definitions": dict(CATEGORY_DEFINITIONS),
     }
 

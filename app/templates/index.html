@@ -57,6 +57,22 @@
           </dl>
           <div><h2>Detected structure</h2><ul id="analysis-features" class="compact-list"></ul></div>
         </div>
+        <div id="reference-objects-panel" class="reference-objects-panel" hidden>
+          <div class="section-label"><span>Architectural objects &amp; tags</span><strong id="reference-objects-count">0</strong></div>
+          <p class="supporting-text" id="reference-objects-description">Information layer tags detected on reference.</p>
+          <div id="reference-objects-legend-filter" class="legend-filter-box" hidden>
+            <label class="field" for="legend-bbox-input">Legend exclusion region (x_min, y_min, x_max, y_max)
+              <input id="legend-bbox-input" type="text" placeholder="e.g. 450, 0, 600, 150">
+            </label>
+            <button id="apply-legend-filter" type="button" class="secondary-button compact-button">Re-filter legend samples</button>
+          </div>
+          <div id="overlapping-members-warning" class="warning-banner" hidden>
+            <strong>Notice:</strong> Some drawing entities are shared among multiple architectural markers. Inspect members below.
+          </div>
+          <div id="reference-objects-list" class="reference-objects-list"></div>
+          <button id="confirm-reference-objects" type="button" class="secondary-button">Confirm architectural objects</button>
+          <p id="confirm-objects-status" class="supporting-text" role="status"></p>
+        </div>
       </section>
 
       <section class="panel" aria-labelledby="rubric-heading">
@@ -99,6 +115,20 @@
               </select>
             </label>
             <p id="completion-policy-summary" class="policy-summary"></p>
+          </fieldset>
+          <fieldset id="unit-policy" class="policy-fieldset">
+            <legend>Drawing unit setting</legend>
+            <label class="field" for="intended-unit">One drawing unit represents
+              <select id="intended-unit">
+                <option value="unspecified">Unspecified / Unchecked</option>
+                <option value="mm">Millimeters (mm)</option>
+                <option value="cm">Centimeters (cm)</option>
+                <option value="m">Meters (m)</option>
+                <option value="in">Inches (in)</option>
+                <option value="ft">Feet (ft)</option>
+              </select>
+            </label>
+            <p id="unit-policy-summary" class="policy-summary">Declared in reference header: <span id="reference-declared-units">—</span>. Confirm the intended unit before approval.</p>
           </fieldset>
           <fieldset>
             <legend>Geometry tolerances</legend>
@@ -240,6 +270,23 @@
           </details>
         </section>
 
+        <section id="unit-scale-warning-card" class="panel unit-scale-card" aria-labelledby="unit-scale-heading" hidden>
+          <div class="unit-scale-header">
+            <span class="status-pill warning" id="unit-scale-state-chip">Unit notice</span>
+            <h2 id="unit-scale-heading">Unit setting &amp; scale review</h2>
+          </div>
+          <p id="unit-scale-explanation" class="unit-scale-explanation"></p>
+          <dl class="unit-scale-grid">
+            <div><dt>Reference declared</dt><dd id="unit-scale-ref-units">—</dd></div>
+            <div><dt>Student declared</dt><dd id="unit-scale-stu-units">—</dd></div>
+            <div><dt>Intended unit</dt><dd id="unit-scale-intended-units">—</dd></div>
+            <div><dt>Estimated scale factor</dt><dd id="unit-scale-factor">—</dd></div>
+          </dl>
+          <div id="unit-scale-ack-box" class="unit-scale-ack-box" hidden>
+            <label><input id="unit-scale-ack-check" type="checkbox"> I acknowledge this unit/scale mismatch notice</label>
+          </div>
+        </section>
+
         <section class="drawing-panel" aria-labelledby="drawing-heading">
           <div class="panel-heading drawing-panel-heading">
             <div><p class="eyebrow">Expected vs actual</p><h2 id="drawing-heading">Reviewed drawing</h2></div>
@@ -285,6 +332,29 @@
             <li><button type="button" class="legend-filter-btn legend-critical" data-role="critical" aria-pressed="false">Critical</button></li>
           </ul>
           <p id="student-only-status" class="student-only-status" hidden>Student submission only &mdash; DraftLens overlays are hidden.</p>
+        </section>
+
+        <section id="object-correspondence-card" class="panel object-correspondence-card" aria-labelledby="correspondence-heading" hidden>
+          <div class="panel-heading">
+            <div><p class="eyebrow">Architectural reference</p><h2 id="correspondence-heading">Object correspondence</h2></div>
+            <span id="correspondence-summary-count" class="status-pill neutral">0 objects</span>
+          </div>
+          <p class="supporting-text">Read-only preview of student drawing correspondence with confirmed reference architectural objects. Does not alter geometry scores.</p>
+          <div class="table-container">
+            <table class="correspondence-table">
+              <thead>
+                <tr>
+                  <th>Occurrence</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Members</th>
+                  <th>Matched</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="correspondence-table-body"></tbody>
+            </table>
+          </div>
         </section>
 
         <div class="review-detail-grid">
