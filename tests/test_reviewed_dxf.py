@@ -294,3 +294,30 @@ def test_existing_fixture_grades_are_unchanged_by_review_serialization():
     assert (good_result["score"], incomplete_result["score"]) == scores
     assert scores[0] == 100
     assert scores[1] < 100
+
+
+def test_missing_geometry_overlay_aligned_with_student_translation():
+    reference = drawing([
+        entity("R-MISSING", "line", [(0, 0), (10, 0)]),
+    ], (0, 0, 10, 0))
+    student = drawing([
+        entity("S-1", "line", [(50, 20), (60, 20)], source="student"),
+    ], (50, 20, 60, 20))
+    comparison = {
+        "score": 75,
+        "normalization": {
+            "student": {
+                "mode": "translation",
+                "translation": [-50.0, -20.0],
+            }
+        },
+        "issues": [
+            issue("E-MISSING", "missing_geometry", reference_id="R-MISSING"),
+        ],
+    }
+    reviewed = build_reviewed_drawing(reference, student, comparison)
+    assert len(reviewed.issues) == 1
+    missing_issue = reviewed.issues[0]
+    assert missing_issue.visual_role == "missing"
+    assert missing_issue.region == (50.0, 20.0, 60.0, 22.0)
+    assert missing_issue.expected_geometry.points == ((50.0, 20.0), (60.0, 20.0))

@@ -81,11 +81,11 @@ class StudentObjectCorrespondence:
 
 
 def is_info_layer(layer_name: str, custom_layers: set[str] | None = None) -> bool:
-    """Case-normalized exact layer matching without overly broad substrings."""
+    """Case-insensitive prefix matching for DL-Info and exact matching for custom layers."""
     if not layer_name:
         return False
     normalized = layer_name.strip().lower()
-    if normalized in STANDARD_INFO_LAYERS:
+    if normalized.startswith("dl-info"):
         return True
     if custom_layers and normalized in {c.strip().lower() for c in custom_layers}:
         return True
@@ -219,6 +219,8 @@ def extract_reference_markers_and_legend(
         "legend_tables_detected": len(legend_tables),
         "table_handles": [t.get("handle") for t in legend_tables if t.get("handle")],
         "ignored_information_text": ignored_text,
+        "detected_info_layers": sorted({e.layer for e in info_entities}, key=str.lower),
+        "info_entities_count": len(info_entities),
     }
     return plan_markers, legend_markers, metadata
 

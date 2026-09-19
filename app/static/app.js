@@ -574,6 +574,7 @@ function resetReferenceDependentState() {
   completionPolicyInput.disabled = false;
   normalizationModeInput.disabled = false;
   assignmentTypeInput.disabled = false;
+  assignmentTypeInput.value = "";
   byId("completion-policy-summary").textContent = "";
   byId("normalization-policy-summary").textContent = "";
   byId("analysis-summary").hidden = true;
@@ -614,10 +615,15 @@ async function inspectReference(file) {
       requestJson("/api/reference/objects/inspect", {method: "POST", body: uploadForm("reference", file)}).catch(() => null),
     ]);
     const validation = validationResponse.validation;
+    const prevRefId = state.referenceId;
+    const prevChosenType = (state.provisionalRubric && prevRefId === suggestion.reference_id) ? state.provisionalRubric.assignment_type : null;
     state.referenceId = suggestion.reference_id;
     state.referenceCanContinue = Boolean(validation.can_continue);
     state.suggestedAssignmentType = suggestion.suggested_assignment_type || analysis.suggested_assignment_type;
     state.provisionalRubric = JSON.parse(JSON.stringify(suggestion.rubric));
+    if (prevChosenType) {
+      state.provisionalRubric.assignment_type = prevChosenType;
+    }
     state.declaredUnits = suggestion.declared_units || (objectsResponse && objectsResponse.declared_units) || null;
     renderValidation(validation);
     renderAnalysis(analysis, validation);
@@ -771,10 +777,10 @@ function renderRubricEditor() {
   byId("rubric-empty").hidden = true;
   byId("rubric-editor").hidden = false;
   byId("assignment-title").value = rubric.assignment_title || "Assignment";
-  assignmentTypeInput.value = rubric.assignment_type || state.suggestedAssignmentType || "Geometric Construction Exercise";
-  rubric.assignment_type = assignmentTypeInput.value;
+  assignmentTypeInput.value = rubric.assignment_type || "";
+  rubric.assignment_type = assignmentTypeInput.value || null;
   assignmentTypeInput.disabled = state.loading;
-  normalizationModeInput.value = rubric.normalization_mode || "strict";
+  normalizationModeInput.value = rubric.normalization_mode || "translation";
   normalizationModeInput.disabled = state.loading;
   renderNormalizationPolicySummary(normalizationModeInput.value);
   completionPolicyInput.value = rubric.completion_scoring_mode || "rule_based";
@@ -884,6 +890,7 @@ function markRubricDirty() {
     state.provisionalRubric.rubric_modified_by_instructor = true;
   }
   byId("rubric-status").textContent = "Changes require instructor approval.";
+  resetReview();
   updateSetupSummary();
   updateWeightTotal();
   updateReviewAvailability();
@@ -2000,12 +2007,34 @@ function graphicRole(element) {
   return issue ? issue.getAttribute('data-role') : null;
 }
 
+const ERROR_ROLES = new Set(["missing", "extra", "inaccurate", "connectivity", "warning", "critical"]);
+
 function applyDrawingRoleVisibility(role) {
   // CAD entity data-layer values are arbitrary layer names, not viewer roles.
   // Classify leaf graphics using the outer source group and authoritative issue role.
   // Anonymous nested wrappers cannot hide matching descendants or leak other roles.
+  const isErrorRole = ERROR_ROLES.has(role);
   drawingGraphics().forEach((element) => {
-    element.classList.toggle('is-role-hidden', role !== 'all' && graphicRole(element) !== role);
+    const elRole = graphicRole(element);
+    let hidden = false;
+    if (role === 'all') {
+      hidden = false;
+    } else if (role === 'reference') {
+      hidden = (elRole !== 'reference');
+    } else if (role === 'student') {
+      hidden = (elRole !== 'student');
+    } else if (isErrorRole) {
+      if (elRole === 'student') {
+        hidden = false; // Complete student base as subdued, readable underlay
+      } else if (elRole === role) {
+        hidden = false; // Only selected error category's overlays
+      } else {
+        hidden = true; // Hide unrelated overlays and full reference base
+      }
+    } else {
+      hidden = (elRole !== role);
+    }
+    element.classList.toggle('is-role-hidden', hidden);
   });
 }
 
@@ -2036,7 +2065,7 @@ function updateDrawingEmptyState(role) {
     return;
   }
   const hasGraphics = hasGraphicsForRole(role);
-  if (!hasGraphics && role !== "all") {
+  if (!hasGraphics && role !== "all" && role !== "student" && role !== "reference") {
     overlay.textContent = "No " + role + " indications";
     overlay.hidden = false;
   } else {
@@ -2076,6 +2105,7 @@ function setActiveRole(role, preserveSelection = true) {
   if (viewport) {
     viewport.setAttribute("data-active-role", role);
     viewport.classList.toggle("student-only-view", role === "student");
+    viewport.classList.toggle("student-underlay-active", ERROR_ROLES.has(role));
   }
   state.viewMode = role === "student" ? "student" : "review";
   if (viewReviewButton) viewReviewButton.setAttribute("aria-pressed", String(role === "all"));

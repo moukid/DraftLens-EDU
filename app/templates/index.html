@@ -55,7 +55,7 @@
             <div><dt>Warnings</dt><dd id="analysis-warnings">—</dd></div>
             <div><dt>Critical</dt><dd id="analysis-critical">—</dd></div>
           </dl>
-          <div><h2>Detected structure</h2><ul id="analysis-features" class="compact-list"></ul></div>
+          <div><h2>Detected geometric features</h2><ul id="analysis-features" class="compact-list"></ul></div>
         </div>
         <div id="reference-objects-panel" class="reference-objects-panel" hidden>
           <div class="section-label"><span>Architectural objects &amp; tags</span><strong id="reference-objects-count">0</strong></div>
@@ -103,6 +103,7 @@
           <p class="policy-summary">The assignment title identifies this assessment. It is separate from the fixed DraftLens Baseline Rubric template.</p>
           <label class="field" for="assignment-type">Assignment type
             <select id="assignment-type" required>
+              <option value="" disabled selected>Select assignment type</option>
               <option value="Geometric Construction Exercise">Geometric Construction Exercise</option>
               <option value="Mixed Geometric Composition">Mixed Geometric Composition</option>
               <option value="Geometric Pattern">Geometric Pattern</option>
@@ -120,8 +121,8 @@
             <legend>Placement policy</legend>
             <label class="field" for="normalization-mode">How student drawing origin is treated
               <select id="normalization-mode">
+                <option value="translation" selected>Translation-tolerant placement</option>
                 <option value="strict">Strict placement</option>
-                <option value="translation">Translation-tolerant placement</option>
               </select>
             </label>
             <p id="normalization-policy-summary" class="policy-summary"></p>

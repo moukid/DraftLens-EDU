@@ -591,6 +591,18 @@ fieldset legend { padding: 0 4px; }
   stroke-width: 5px !important;
 }
 
+/* Subdued readable student underlay during error category views */
+.drawing-viewport.student-underlay-active svg > g[data-layer="student"],
+.drawing-viewport[data-active-role="missing"] svg > g[data-layer="student"],
+.drawing-viewport[data-active-role="extra"] svg > g[data-layer="student"],
+.drawing-viewport[data-active-role="inaccurate"] svg > g[data-layer="student"],
+.drawing-viewport[data-active-role="connectivity"] svg > g[data-layer="student"],
+.drawing-viewport[data-active-role="warning"] svg > g[data-layer="student"],
+.drawing-viewport[data-active-role="critical"] svg > g[data-layer="student"] {
+  opacity: 0.40;
+  pointer-events: none !important;
+}
+
 /* Applied only to individual graphics, classified from authoritative SVG roles. */
 .drawing-viewport svg .is-role-hidden {
   display: none !important;

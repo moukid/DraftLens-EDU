@@ -61,9 +61,14 @@ async function check(name, fn) {
       for (const role of roles) {
         await legend(role).click();
         const shapes=await visibleShapes();
-        const expected=role==='all'?327:role==='reference'||role==='student'?160:role==='inaccurate'?2:1;
+        const isErrorRole = ['missing','extra','inaccurate','connectivity','warning','critical'].includes(role);
+        const expected=role==='all'?327:['reference','student'].includes(role)?160:role==='inaccurate'?162:161;
         assert.equal(shapes.length,expected,`${role}: unexpected visible geometry count`);
-        assert.ok(role==='all'||shapes.every(s=>s.role===role),`${role} leaks unrelated graphics`);
+        if (isErrorRole) {
+          assert.ok(shapes.every(s=>s.role===role || s.role==='student'),`${role} leaks unrelated graphics`);
+        } else {
+          assert.ok(role==='all'||shapes.every(s=>s.role===role),`${role} leaks unrelated graphics`);
+        }
         assert.equal(await legend(role).getAttribute('aria-pressed'),'true');
         assert.equal(await page.locator('#overlay-legend [aria-pressed="true"]').count(),1);
       }
@@ -139,7 +144,7 @@ async function check(name, fn) {
         issue.replaceWith(wrapper); wrapper.append(issue);
       });
       await legend('inaccurate').click();
-      assert.equal((await visibleShapes()).length,2);
+      assert.equal((await visibleShapes()).length,162);
       const hiddenHit=await page.evaluate(()=>{
         const node=document.querySelector('svg > g[data-layer="student"] [data-entity-id]');
         const b=node.getBoundingClientRect();
@@ -232,7 +237,7 @@ async function check(name, fn) {
         for(const role of roles) {
           await legend(role).click();
           const shapes=await visibleShapes();
-          assert.equal(shapes.length,role==='all'?327:['reference','student'].includes(role)?160:role==='inaccurate'?2:1,`${width} ${role}`);
+          assert.equal(shapes.length,role==='all'?327:['reference','student'].includes(role)?160:role==='inaccurate'?162:161,`${width} ${role}`);
         }
         await legend('all').click();
         await page.locator('.drawing-panel').screenshot({path:path.join(destination,`all-${width}.png`)});

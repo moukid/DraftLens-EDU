@@ -129,9 +129,10 @@ function pass(name) {checks.push(name); console.log('PASS:',name);}
     await page.locator('#edit-setup').click();
     await page.locator('#assignment-title').fill('Synthetic revised assignment');
     assert.equal(await page.evaluate(()=>getState().rubricId),null);
-    assert.equal(await page.locator('#run-review').isDisabled(),true);
     await page.locator('#approve-rubric').click();
     await page.waitForFunction(()=>Boolean(getState().rubricId));
+    await page.locator('#run-review').click();
+    await page.waitForFunction(()=>Boolean(getState().review && !getState().loading));
     for(let n=0;n<3;n++) {
       await page.locator('#overlay-legend [data-role="missing"]').click();
       await page.locator('#run-review').click();

@@ -163,6 +163,34 @@ def _snapshot(entity: Entity, source: str) -> ReviewedEntity:
     )
 
 
+def _translate_snapshot(entity: ReviewedEntity, dx: float, dy: float) -> ReviewedEntity:
+    if not (dx or dy):
+        return entity
+    points = tuple((round(x + dx, 6), round(y + dy, 6)) for x, y in entity.points)
+    bbox = None
+    if entity.bbox:
+        bbox = (
+            round(entity.bbox[0] + dx, 6),
+            round(entity.bbox[1] + dy, 6),
+            round(entity.bbox[2] + dx, 6),
+            round(entity.bbox[3] + dy, 6),
+        )
+    return ReviewedEntity(
+        entity_id=entity.entity_id,
+        source=entity.source,
+        kind=entity.kind,
+        layer=entity.layer,
+        points=points,
+        radius=entity.radius,
+        start_angle=entity.start_angle,
+        end_angle=entity.end_angle,
+        closed=entity.closed,
+        text=entity.text,
+        bbox=bbox,
+        properties_json=entity.properties_json,
+    )
+
+
 def _union_regions(*regions: tuple[float, float, float, float] | None) -> tuple[float, float, float, float] | None:
     valid = [region for region in regions if region and all(_finite(value) for value in region)]
     if not valid:
@@ -259,6 +287,12 @@ def build_reviewed_drawing(
     student_by_id = {entity.entity_id: entity for entity in student_entities}
     reviewed_issues: list[ReviewedIssue] = []
 
+    student_norm = (comparison.get("normalization") or {}).get("student", {})
+    t = student_norm.get("translation") or [0.0, 0.0]
+    norm_mode = student_norm.get("mode")
+    ref_to_stu_dx = -float(t[0]) if (norm_mode == "translation" and t and len(t) >= 2) else 0.0
+    ref_to_stu_dy = -float(t[1]) if (norm_mode == "translation" and t and len(t) >= 2) else 0.0
+
     for index, raw in enumerate(comparison.get("issues", []), 1):
         raw_issue = deepcopy(raw)
         issue_id = str(raw_issue.get("error_id") or raw_issue.get("id") or f"E-{index:03d}")
@@ -268,14 +302,36 @@ def build_reviewed_drawing(
         expected_id = raw_issue.get("reference_entity_id")
         actual = student_by_id.get(str(source_id)) if source_id is not None else None
         expected = reference_by_id.get(str(expected_id)) if expected_id is not None else None
+        if expected is not None and (ref_to_stu_dx or ref_to_stu_dy):
+            expected = _translate_snapshot(expected, ref_to_stu_dx, ref_to_stu_dy)
+
+        raw_loc = raw_issue.get("location")
+        if (
+            raw_loc
+            and isinstance(raw_loc, (list, tuple))
+            and len(raw_loc) >= 2
+            and (ref_to_stu_dx or ref_to_stu_dy)
+            and source_id is None
+        ):
+            loc_for_region = (
+                round(float(raw_loc[0]) + ref_to_stu_dx, 6),
+                round(float(raw_loc[1]) + ref_to_stu_dy, 6),
+            )
+        else:
+            loc_for_region = raw_loc
+
         visual_role = _role(category, severity)
         if visual_role == "connectivity":
             region = _union_regions(
                 _measurement_region(raw_issue.get("measurement")),
-                _location_region(raw_issue.get("location")),
+                _location_region(loc_for_region),
             )
         else:
-            region = _union_regions(expected.bbox if expected else None, actual.bbox if actual else None, _location_region(raw_issue.get("location")))
+            region = _union_regions(
+                expected.bbox if expected else None,
+                actual.bbox if actual else None,
+                _location_region(loc_for_region),
+            )
         raw_deduction, applied_deduction, deduction_status, suppression_reason = _deduction_contract(raw_issue)
         reviewed_issues.append(ReviewedIssue(
             issue_id=issue_id,

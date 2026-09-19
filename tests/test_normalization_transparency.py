@@ -66,13 +66,21 @@ def strings(value):
             yield from strings(item)
 
 
-def test_suggested_rubric_defaults_to_strict_and_requires_approval():
+def test_suggested_rubric_defaults_to_translation_and_requires_approval():
     body = suggest(ARCS / "01-ARC-Reference.dxf")
 
-    assert body["normalization_mode"] == "strict"
-    assert body["rubric"]["normalization_mode"] == "strict"
+    assert body["normalization_mode"] == "translation"
+    assert body["rubric"]["normalization_mode"] == "translation"
     assert body["rubric"]["approved"] is False
     assert body["requires_instructor_approval"] is True
+
+
+def test_strict_mode_is_selectable_and_approval_returns_selected_mode():
+    approval = approve(ARCS / "01-ARC-Reference.dxf", "strict")
+
+    assert approval["normalization_mode"] == "strict"
+    assert approval["rubric"]["normalization_mode"] == "strict"
+    assert approval["rubric"]["approved"] is True
 
 
 def test_translation_mode_is_selectable_and_approval_returns_selected_mode():

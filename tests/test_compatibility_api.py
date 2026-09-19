@@ -43,12 +43,14 @@ def _plan_bytes(scale: float = 1.0, count: int = 4) -> bytes:
     return stream.getvalue().encode("utf-8")
 
 
-def _approve(reference: bytes) -> dict:
+def _approve(reference: bytes, mode: str | None = None) -> dict:
     suggestion = client.post(
         "/api/rubric/suggest",
         files={"reference": ("reference.dxf", reference, "application/dxf")},
     ).json()
     suggestion["rubric"]["assignment_type"] = "Technical Drawing"
+    if mode is not None:
+        suggestion["rubric"]["normalization_mode"] = mode
     response = client.post(
         "/api/rubric/approve",
         json={
@@ -135,7 +137,7 @@ def test_unrelated_t_crossing_is_withheld_without_issue_flood():
 def test_unrelated_line_heavy_submission_is_withheld_until_explicit_override():
     reference = _plan_bytes(count=108)
     student = (AUDIT / "03_wrong_length_73C_80_units.dxf").read_bytes()
-    _approve(reference)
+    _approve(reference, mode="strict")
 
     grade = client.post("/api/grade", files=_files(reference, student)).json()
     assert grade["compatibility_status"] == "incompatible"

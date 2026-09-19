@@ -30,12 +30,15 @@ def test_is_info_layer():
     assert is_info_layer("DL-INFO-TAGS") is True
     assert is_info_layer("dl-info-legend") is True
     assert is_info_layer("DL-INFO-REGIONS") is True
+    assert is_info_layer("DL-Info-Doors") is True
+    assert is_info_layer("dl-info-notes") is True
     assert is_info_layer("  DL-INFO-TAGS  ") is True
 
     assert is_info_layer("0") is False
     assert is_info_layer("WALLS") is False
     assert is_info_layer("DOORS") is False
     assert is_info_layer("DL-EXTRA-INFO") is False
+    assert is_info_layer("FLOOR-DL-Info") is False
     assert is_info_layer("") is False
 
     assert is_info_layer("CUSTOM_TAGS", custom_layers={"CUSTOM_TAGS"}) is True

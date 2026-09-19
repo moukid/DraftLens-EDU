@@ -388,3 +388,52 @@ def test_pdf_report_export_is_independent_of_browser_filter_and_retains_complete
     assert "Drawing overlay legend" in p2_text
     for role_label in ["Reference", "Student", "Missing", "Extra", "Inaccurate", "Connectivity", "Warning", "Critical"]:
         assert role_label in p2_text
+
+
+def test_error_filter_preserves_student_underlay_visibility():
+    """Verify student geometry remains visible (not hidden) for all 6 error category filters."""
+    result = _run_ui_behavior('''
+    const { sandbox, getOrCreate } = createHarness();
+    const svg = new MockElement('', 'svg');
+    getOrCreate('drawing-viewport').replaceChildren(svg);
+
+    const studentGroup = new MockElement('', 'g');
+    studentGroup.setAttribute('data-layer', 'student');
+    studentGroup.parentElement = svg;
+
+    const studentLine = new MockElement('', 'line');
+    studentLine.parentElement = studentGroup;
+
+    const issuesGroup = new MockElement('', 'g');
+    issuesGroup.setAttribute('data-layer', 'issues');
+    issuesGroup.parentElement = svg;
+
+    const missingRoleGroup = new MockElement('', 'g');
+    missingRoleGroup.setAttribute('data-role', 'missing');
+    missingRoleGroup.parentElement = issuesGroup;
+
+    const missingLine = new MockElement('', 'line');
+    missingLine.parentElement = missingRoleGroup;
+    missingLine.closest = () => missingRoleGroup;
+
+    svg.querySelectorAll = () => [studentLine, missingLine];
+
+    const errorRoles = ['missing', 'extra', 'inaccurate', 'connectivity', 'warning', 'critical'];
+    const underlayResults = {};
+
+    for (const role of errorRoles) {
+      sandbox.setActiveRole(role);
+      const viewport = getOrCreate('drawing-viewport');
+      underlayResults[role] = {
+        studentHidden: studentLine.classList.contains('is-role-hidden'),
+        underlayClassActive: viewport.classList.contains('student-underlay-active'),
+        activeRoleAttr: viewport.getAttribute('data-active-role')
+      };
+    }
+
+    console.log(JSON.stringify(underlayResults));
+    ''')
+    for role in ['missing', 'extra', 'inaccurate', 'connectivity', 'warning', 'critical']:
+        assert result[role]['studentHidden'] is False
+        assert result[role]['underlayClassActive'] is True
+        assert result[role]['activeRoleAttr'] == role

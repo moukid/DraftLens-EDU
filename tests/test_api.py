@@ -130,6 +130,16 @@ def test_rubric_approval_requires_assignment_type_confirmation():
  assert response.status_code==422
  assert "confirmation of the assignment type" in response.json()["detail"]
 
+
+def test_rubric_approval_rejects_empty_assignment_type():
+ document=_abstract_document_bytes()
+ suggestion=client.post("/api/rubric/suggest",files={"reference":("abstract.dxf",document,"application/dxf")}).json()
+ suggestion["rubric"]["assignment_type"]=""
+ response=client.post("/api/rubric/approve",json={"reference_id":suggestion["reference_id"],"rubric":suggestion["rubric"]})
+ assert response.status_code==422
+
+
+
 def test_instructor_confirmed_assignment_type_is_returned_by_review():
  document=_abstract_document_bytes()
  suggestion=client.post("/api/rubric/suggest",files={"reference":("abstract.dxf",document,"application/dxf")}).json()

@@ -535,7 +535,7 @@ async def rubric_suggest(reference: UploadFile = File(...)):
     suggested_rubric = default_rubric().model_copy(
         update={
             "assignment_title": assignment_title,
-            "normalization_mode": "strict",
+            "normalization_mode": "translation",
             "intended_unit": intended_unit,
         }
     )
@@ -558,7 +558,7 @@ async def rubric_suggest(reference: UploadFile = File(...)):
 
 @app.post("/api/rubric/approve")
 def rubric_approve(request: RubricApprovalRequest):
-    if request.rubric.assignment_type is None:
+    if not request.rubric.assignment_type or not str(request.rubric.assignment_type).strip():
         raise HTTPException(422, "Instructor confirmation of the assignment type is required before rubric approval.")
     if request.rubric.intended_unit not in {"mm", "cm", "m", "in", "ft"}:
         raise HTTPException(422, "Confirm the intended assignment unit before rubric approval.")

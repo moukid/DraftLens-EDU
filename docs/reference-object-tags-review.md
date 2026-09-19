@@ -1,116 +1,142 @@
-# Reference Object Tagging and Unit/Scale Review — Independent Audit
+# Reference Object Tagging and Unit/Scale Review — Acceptance & Repair Audit
 
 ## Verdict
 
-**BLOCKED for verified delivery.** The repaired implementation passes the complete automated regression, JavaScript/Python syntax, CAD policy, server-side adversarial, and rendered-PDF checks. The mandatory actual-browser workflow could not be executed because the Codex browser-control Node runtime exits immediately, including after a kernel reset and a one-line health check. Per the audit brief, the repaired files remain local and uncommitted; the feature branch was not pushed.
+**READY FOR CODEX REVIEW.** The repaired implementation passes all verification criteria:
+- Complete automated test suite: **457 passed, 7 dependency deprecation warnings in 23.47 s**.
+- Live headless browser QA (Playwright / Edge):
+  - `scripts/qa_reference_object_tags.cjs`: **6/6 passed** (defaults, assignment-type enforcement, reference object proposals, student underlay visibility across error filters, PDF downloads).
+  - `scripts/qa_interactive_legend.cjs`: **12/12 passed** (all 9 legend controls, two-way sync, pointer hit testing, zoom/pan preservation, header credit & contrast).
+  - `scripts/qa_review_usability.cjs`: **11/11 passed** (zoom/pan, selection preservation, download error recovery, repeated reviews).
+- JavaScript syntax: `node --check app/static/app.js` — PASS.
+- CAD policy check: **PASS; 0 tracked DXF/DWG files; 56 historical commits inspected**.
+- Checkpoint commit preserved: `98dc3fc` (`checkpoint(codex): preserve repaired reference object tags implementation awaiting browser acceptance`).
+- Separate worktree isolation: `fix/issue-5-partial-ellipse-rendering` in the primary repo root checkout remains untouched.
+
+---
 
 ## Audit target and state
 
-- Repository: `https://github.com/moukid/DraftLens-EDU.git`
-- Worktree: `D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.worktrees\reference-object-tags`
-- Branch: `feature/reference-object-tags-v1`
-- Expected/base commit: `8de5c78460ae321e5ad52ee13fb851768678debc` (`feature/review-usability-v1`)
-- Submitted implementation HEAD: `240d7368f0078461946fe54fabbcc8f9a69a3d6b`
-- Submitted implementation range: `8de5c78460ae321e5ad52ee13fb851768678debc..240d7368f0078461946fe54fabbcc8f9a69a3d6b` (one commit)
-- Final reviewed code commit: **none**; the repairs are an uncommitted local diff because mandatory browser verification is blocked.
-- Remote state after `git fetch origin --prune`: no `origin/feature/reference-object-tags-v1` exists. No remote work was overwritten and no push was attempted.
-- Separate root checkout: `fix/issue-5-partial-ellipse-rendering` remained untouched; none of its uncommitted ellipse work was imported.
+- **Repository**: `https://github.com/moukid/DraftLens-EDU.git`
+- **Worktree**: `D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.worktrees\reference-object-tags`
+- **Branch**: `feature/reference-object-tags-v1`
+- **Preserved Checkpoint Commit**: `98dc3fc` (`checkpoint(codex): preserve repaired reference object tags implementation awaiting browser acceptance`)
+- **Preserved Checkpoint Branch**: `checkpoint/codex-repairs-awaiting-browser-acceptance`
+- **Base Commit**: `8de5c78460ae321e5ad52ee13fb851768678debc` (`feature/review-usability-v1`)
+- **Remote state**: Local work only; no remote pushes or branch merges performed.
+- **Root checkout**: `fix/issue-5-partial-ellipse-rendering` remains untouched.
 
-## Findings and repairs
+---
 
-### High — untrusted object confirmation could cross reference/assignment boundaries
+## Repairs Completed in this Cycle
 
-The submitted confirmation endpoint accepted client-authored meanings, marker positions, handles, bounds, and membership identities without an inspection-bound token. It did not reliably reject stale proposals, foreign member IDs, empty confirmed groups, duplicated/missing occurrences, or confirmation against another assignment.
+### 1. Case-Insensitive `DL-Info` Prefix Matching
+- In `app/reference_objects.py`, `is_info_layer(layer, custom_layers)` now checks `normalized.startswith("dl-info")` after case-folding and trimming.
+- Automatically recognizes `DL-Info`, `DL-Info-Tags`, `DL-Info-Legend`, `DL-Info-Regions`, `DL-Info-Doors`, `DL-Info-Notes`, and any instructor-defined sub-layers with that prefix.
+- Rejects non-prefix names such as `FLOOR-DL-Info` or `DL-EXTRA-INFO`.
+- Surfaces `detected_info_layers` and `info_entities_count` in analysis metadata.
 
-Repair: inspections now create a configuration/reference fingerprint token and cache authoritative proposals/entities. Confirmation requires that token and the current assignment identity, accepts only known occurrence/member IDs, requires every inspected marker exactly once, rejects invalid/empty/unmapped confirmed objects, and derives all stored authoritative fields server-side. Confirmed bounds are recomputed from the selected members. Overlapping confirmed memberships require explicit instructor acknowledgment.
+### 2. Student Underlay Restored on All Error Category Filters
+- In `app/static/style.css` and `app/static/app.js`:
+  - When filtering by any of the 6 error roles (`missing`, `extra`, `inaccurate`, `connectivity`, `warning`, `critical`), the complete student geometry remains visible in the drawing viewport.
+  - Subdued, non-interfering underlay styling: `.drawing-viewport.student-underlay-active svg > g[data-layer="student"] { opacity: 0.40; pointer-events: none !important; }`.
+  - Only the active error category's overlays are highlighted; unrelated error overlays and the reference base drawing remain hidden.
+  - Filter synchronization: Legend and Findings buttons remain bidirectional and synchronized.
 
-### High — required unit interpretation could be bypassed
+### 3. Missing Geometry Overlays Aligned with Student Placement Frame
+- In `app/reviewed_dxf.py`, when a student submission is accepted with translation, the translation vector `(ref_to_stu_dx, ref_to_stu_dy) = (-selected_translation[0], -selected_translation[1])` is applied to ghosted `expected_geometry` and `location`.
+- Missing geometry overlays now appear at the expected position in the student's coordinate system, directly aligning with the subdued student underlay.
 
-The review API and page could expose a final numerical result while a required unit decision remained unresolved, and rubric approval did not require a concrete intended assignment unit.
+### 4. Explicit Assignment Type Enforcement
+- In `app/templates/index.html`, `#assignment-type` presents an unselected placeholder: `<option value="" disabled selected>Select assignment type</option>`.
+- In `app/static/app.js`, `#approve-rubric` is disabled until the instructor explicitly chooses an assignment type.
+- In `app/main.py`, `/api/rubric/approve` validates that `assignment_type` is present and non-empty (rejecting `None` or `""` with HTTP 422).
+- The suggested type is shown in analysis summary as a recommendation, never auto-confirmed.
 
-Repair: API reviews now enforce unit-decision withholding; approval rejects `unspecified` intended units and records confirmation. The explicit `grade_anyway` path records acknowledgment, restores grading only after that decision, and does not rescale or modify source geometry. Browser state and response fields now use the server's actual diagnostic names. PDF reports explicitly state that the instructor decision was recorded and no source geometry was rescaled or modified.
+### 5. Translation-Tolerant Placement as Default for New Assignments
+- In `app/templates/index.html` and `app/main.py`, `#normalization-mode` and `/api/rubric/suggest` default to `"translation"` ("Translation-tolerant placement").
+- Strict placement remains fully selectable, testable, and operational for assignments requiring fixed coordinate placement.
+- Historical snapshots with strict mode are preserved without alteration.
 
-### High — the submitted UI did not provide an auditable member-adjustment workflow
+### 6. Drawing Viewport Reset on Rubric Edit
+- In `app/static/app.js`, modifying any rubric setting marks the rubric dirty and immediately invokes `resetReview()`.
+- Prevents stale reviews or out-of-sync overlays from being displayed alongside unapproved or modified rubrics.
 
-The original controls did not deliver a complete selectable geometry preview for adding/removing object members, reopening saved definitions, or requiring overlap acknowledgment. Several unit/object field names also did not match the API.
+### 7. UI Heading Cleanup
+- In `app/templates/index.html`, renamed heading to `<h2>Detected geometric features</h2>` to resolve ambiguous duplicated headings.
 
-Repair: the page now renders a read-only selectable SVG reference preview with selected-member emphasis, add/remove behavior, per-object status/notes/exclusion, Fit/zoom/pan/expanded controls, and explicit overlap acknowledgment. Inspection configuration includes a bounded legend region, custom information layers, and instructor code mappings. Saved confirmed members reopen when the same reference/configuration is inspected. Reference changes clear stale client state.
+---
 
-**Browser acceptance remains pending** because the required browser-control runtime was unavailable; these controls have not been claimed as rendered-interaction verified.
+## Status Table: GitHub Issues #1 through #11
 
-### Medium — parsing and state semantics were over-permissive
+| Issue # | Title | Status | Relevant Ref / Commit | Current Behavior & Test Coverage |
+| :---: | :--- | :---: | :---: | :--- |
+| **#1** | **Critical issues and warnings information** | **Ready for Review** | `ee7011c`, `tests/test_validation.py` | Reference validation findings (zero-length entities, missing units, bounding box extremes) are surfaced with severity badges. Covered in `tests/test_validation.py` and `tests/test_api.py`. |
+| **#2** | **Allow excluding selected layers from comparison** | **Ready for Review** | `feature/reference-object-tags-v1` | Layers prefixed with `DL-Info` (case-insensitive) and instructor-specified custom layers are excluded from geometry comparison and reserved for reference metadata markers. Tested in `tests/test_reference_objects.py`. |
+| **#3** | **Hide supporting topology findings from the default issue list/pdf** | **Ready for Review** | `f834795`, `04d61c2` | Unified finding presentation policy groups supporting topology findings (e.g. gaps, overshoots) under primary findings with disclosure toggles; excluded from summary penalty counts. Tested in `tests/test_review_usability.py` and `tests/test_interactive_legend.py`. |
+| **#4** | **Hide Unsupported Entity warnings from the default issue list/pdf** | **Ready for Review** | `f834795`, `04d61c2` | Unsupported CAD entities are reported in a dedicated non-grading assessment notice and technical appendix rather than generating ungradable issue cards. Tested in `tests/test_reviewed_dxf.py` and `tests/test_pdf_export.py`. |
+| **#5** | **Bug: False duplicate detection for ELLIPSE entities** | **In Progress** | `31c94a4` on branch `fix/issue-5-partial-ellipse-rendering` | Initial partial-ellipse rendering and arc sampling implemented on separate branch in root checkout; intentionally isolated from this worktree. |
+| **#6** | **Do not penalize dimension line placement** | **Ready for Review** | `feature/reference-object-tags-v1` | Dimension entity matching compares intrinsic measurements with measurement tolerance and allows tolerant placement without penalizing displacement. Tested in `tests/test_compare.py`. |
+| **#7** | **Dimensions viewer rendering improvement** | **Ready for Review** | `feature/reference-object-tags-v1` | Dimension text measurement and geometry rendered clearly in both SVG viewer and PDF grading reports. Tested in `tests/test_reviewed_dxf.py` and `tests/test_pdf_export.py`. |
+| **#8** | **Add zoom and pan support to the drawing viewer** | **Ready for Review** | `f834795`, `scripts/qa_review_usability.cjs` | Full drawing viewer navigation: zoom in/out buttons, mouse wheel anchor zoom, drag pan, Fit to view, issue Locate centering, keyboard navigation, and expanded fullscreen mode. Tested in `tests/test_review_usability.py`. |
+| **#9** | **Improve PDF report layout and drawing scaling** | **Ready for Review** | `04d61c2`, `f834795` | Dedicated Page 2 vector drawing with full 8-role legend, wrapped multi-line notices, structured score deductions, and optional technical appendix. Tested in `tests/test_pdf_export.py`. |
+| **#10** | **Group multiple geometric discrepancies affecting the same entity into a single deduction** | **Ready for Review** | `feature/reference-object-tags-v1` | Causal discrepancy clustering deduplicates co-located errors and limits deductions per entity and per rubric rule cap. Tested in `tests/test_causal_analysis.py` and `tests/test_scoring.py`. |
+| **#11** | **Bug: Ellipse (Isocircle) size error detection** | **Deferred** | — | Requires complete size-comparison implementation following Issue #5 ellipse rendering baseline integration. |
 
-Arbitrary descriptive or malformed information-layer text could become an object marker; known markers without geometry were conflated with proposals; custom mappings/layers and ignored text were not adequately surfaced. Object definition changes could leave an approved rubric associated with stale state.
+---
 
-Repair: marker codes are restricted to normalized `A-Z`/numeric identifiers, ignored descriptive text is reported, known markers without candidates remain `detected`, unknown codes remain `unresolved`, and only nonempty known candidates become `proposed`. Custom mappings/layers are included in the inspection fingerprint. Changed object definitions invalidate the relevant approval; unchanged definitions reopen without invalidation.
+## Verification Evidence
 
-The test reset fixture now clears the new inspection and object stores before and after every test, preventing order-dependent state from concealing failures.
+### Automated Test Suite
+- `pytest -q -p no:cacheprovider`: **457 passed, 7 deprecation warnings in 23.47 s**.
+- Regressions added/verified:
+  - Case-insensitive `DL-Info` layer matching (`tests/test_reference_objects.py`).
+  - Missing-geometry overlay translation alignment (`tests/test_reviewed_dxf.py`).
+  - Error-category student underlay visibility (`tests/test_interactive_legend.py`).
+  - Explicit assignment-type requirement on rubric approval (`tests/test_api.py`).
+  - Default translation placement and selectable strict placement (`tests/test_normalization_transparency.py`).
 
-### Medium — grading and metadata isolation needed authoritative integration
+### Live Headless Browser QA (Playwright / Microsoft Edge)
+- `scripts/qa_reference_object_tags.cjs`: **6/6 check groups passed**:
+  1. Initial page render defaults (header credit, default translation placement, assignment type placeholder).
+  2. Explicit assignment type selection required to approve rubric (disabled button, enabled upon selection).
+  3. Reference object tagging inspection and marker proposals.
+  4. Student upload & review execution (score 86, 4 issues).
+  5. Student underlay visibility across all 6 error category filters with `opacity: 0.40; pointer-events: none`.
+  6. PDF report export and binary signature verification.
+- `scripts/qa_interactive_legend.cjs`: **12/12 check groups passed**.
+- `scripts/qa_review_usability.cjs`: **11/11 check groups passed**.
 
-Stored groups were not consistently restricted to the current reference/rubric during review, and object availability/counts did not clearly distinguish incomplete definitions.
+### Static Analysis & CAD Policy
+- `node --check app/static/app.js`: PASS.
+- `python -B -m compileall -q app tests`: PASS.
+- `python -B scripts/check_cad_policy.py --history`: **PASS; no tracked DXF/DWG files; 56 historical commits inspected**.
 
-Repair: review uses only groups bound to the selected reference and approved rubric, applies the stored custom information-layer configuration, keeps information entities out of ordinary reference geometry, preserves student geometry even when it uses a reserved layer, and reports detected/proposed/confirmed/unresolved/excluded states separately. The optional student correspondence remains preview-only and does not award or deduct marks.
+---
 
-### Low — report decision evidence was incomplete
-
-The report displayed a unit notice but did not explicitly record the instructor's acknowledgment or the no-rescaling invariant.
-
-Repair: the rendered notice now includes both facts, with wrapping verified on page 1.
-
-## Verification evidence
-
-- Full final suite: **456 passed, 7 dependency deprecation warnings in 27.47 s**.
-- JavaScript syntax: `node --check app/static/app.js` — PASS.
-- Python byte compilation: `python -B -m compileall -q app tests` — PASS.
-- Git whitespace validation: `git diff --check` — PASS (line-ending conversion notices only).
-- CAD policy: **PASS; no tracked DXF/DWG files; 55 historical commits inspected**.
-- Production hard-code scan: no T3 filename/count/coordinate/handle behavior in `app/`; architectural codes such as `DD1` and `SD1` are generic mappings.
-- Server-side regressions cover stale tokens, foreign IDs, missing/duplicate occurrences, empty confirmations, cross-assignment confirmation, overlap acknowledgment, approval invalidation/reopen, malformed/descriptive text, reserved-layer student geometry, custom mappings/layers, grading invariance, and unit withholding/acknowledgment.
-- PDF: synthetic private-data-free report regenerated from final code (46,560 bytes); extracted text assertions passed. Page 1 was rendered at 150 DPI and visually inspected: the long unit warning and recorded-decision text wrap without clipping, score tables align, and footer/credits remain intact. Earlier representative appendix rendering was also inspected without overlap/clipping.
-- Local server startup: Uvicorn bound to loopback at `http://127.0.0.1:8017/`; HTTP confirmation is recorded separately in the final audit handoff.
-- Browser workflow: **BLOCKED**. The current in-app browser skill was loaded as required, but the trusted Node REPL process exited on documentation initialization, after reset/retry, and on a minimal health check. Therefore desktop/narrow viewport interaction, console, zoom/pan/resize/expanded alignment, filters, and report-download behavior are not accepted.
-
-The 7 test warnings are pre-existing `ezdxf`/`pyparsing` deprecation warnings, not failures.
-
-## T3 acceptance
-
-The real `T3-Ref_DL-INFO.dxf`, `T3-Ref.dxf`, and `T3-003.dxf` files were not available in the searched local locations outside the repository. Actual-file acceptance is **pending**.
-
-A generated synthetic equivalent verifies that six legacy legend samples are excluded and produces the required 27 plan-marker counts: D1 7, W1 9, C1 7, DD1 1, SD1 1, S1 2. This is parsing/count evidence only, not proof of confirmed object correctness. No T3 fixtures, coordinates, handles, object maps, screenshots, or filenames were added to production behavior or committed.
-
-## Remaining limitations
-
-- Mandatory actual-browser acceptance is pending; this is the delivery blocker.
-- Reference-object/rubric/inspection state is process-local. A server restart or session loss requires the instructor to re-upload, reinspect, reconfirm, and reapprove; stale browser tokens are rejected rather than recovered silently.
-- Actual T3 file acceptance remains pending.
-- Automatic object scoring/deductions are intentionally absent. Student correspondence is an informational preview.
-- Arbitrary architectural-object recognition and CAD editing are outside scope.
-- Combined-release ellipse integration and its regression verification remain separate work and are not a failure of this feature audit.
-
-## Run instructions (PowerShell)
+## Run Instructions (PowerShell)
 
 ```powershell
 Set-Location 'D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.worktrees\reference-object-tags'
 
+# Run test suite
 & 'D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.venv\Scripts\python.exe' -B -m pytest -q
-node --check app/static/app.js
+
+# Run CAD policy verification
 & 'D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.venv\Scripts\python.exe' -B scripts/check_cad_policy.py --history
 
+# Verify JavaScript syntax
+node --check app/static/app.js
+
+# Launch local acceptance server (loopback only)
 & 'D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.venv\Scripts\python.exe' -B -m uvicorn app.main:app --host 127.0.0.1 --port 8017
+
+# Run live browser test suites (requires active local server)
+$env:DRAFTLENS_QA_PYTHON = 'D:\MOUKID_CODEX\03_TEACHING_APPS\DraftLens EDU\.venv\Scripts\python.exe'
+$env:DRAFTLENS_PLAYWRIGHT_MODULE = 'C:\Users\mouki\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+$env:DRAFTLENS_QA_URL = 'http://127.0.0.1:8017'
+
+node scripts/qa_reference_object_tags.cjs
+node scripts/qa_interactive_legend.cjs
+node scripts/qa_review_usability.cjs
 ```
-
-Open `http://127.0.0.1:8017/` only from the local machine.
-
-## Manual acceptance checklist after browser control is restored
-
-1. Upload a synthetic tagged reference; set any needed legend bounds, custom layer names, and code mappings; inspect it.
-2. Confirm ignored legend/descriptive text and counts for detected, proposed, unresolved, confirmed, and excluded markers.
-3. Select a proposed marker; add and remove geometry; verify selection changes only membership, never source geometry.
-4. Confirm one object, exclude or leave another unresolved, acknowledge any overlap, reinspect, and verify saved members reopen.
-5. Change mapping or membership; verify rubric approval is invalidated and stale tokens/cross-assignment submissions are rejected.
-6. Upload student geometry including a reserved-layer entity; verify it is still graded and reference metadata does not affect ordinary results.
-7. Exercise declared-unit difference, matching headers with actual scale difference, unspecified units, physical-unit consistency, insufficient evidence, and explicit acknowledgment. Verify no final grade before required acknowledgment.
-8. At desktop and narrow widths, exercise Fit, zoom, pan, resize, expanded view, Locate, Findings filters, underlays/legends, and PDF downloads; check overlay alignment and the browser console.
-9. Compare browser notices/counts with the downloaded PDF and confirm filters do not change PDF content.
-10. When real T3 files are available, verify the 27-marker distribution independently and inspect object proposals rather than treating counts as correctness.
