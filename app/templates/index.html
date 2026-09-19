@@ -64,12 +64,32 @@
             <label class="field" for="legend-bbox-input">Legend exclusion region (x_min, y_min, x_max, y_max)
               <input id="legend-bbox-input" type="text" placeholder="e.g. 450, 0, 600, 150">
             </label>
-            <button id="apply-legend-filter" type="button" class="secondary-button compact-button">Re-filter legend samples</button>
+            <label class="field" for="code-mappings-input">Custom code mappings (JSON)
+              <input id="code-mappings-input" type="text" placeholder='{"X1":"Custom object"}'>
+            </label>
+            <label class="field" for="custom-info-layers-input">Additional information layers (comma-separated)
+              <input id="custom-info-layers-input" type="text" placeholder="e.g. COURSE-TAGS, COURSE-LEGEND">
+            </label>
+            <button id="apply-legend-filter" type="button" class="secondary-button compact-button">Apply information settings</button>
           </div>
           <div id="overlapping-members-warning" class="warning-banner" hidden>
             <strong>Notice:</strong> Some drawing entities are shared among multiple architectural markers. Inspect members below.
           </div>
+          <div id="reference-object-preview-panel" class="reference-object-preview-panel" hidden>
+            <div class="reference-object-preview-toolbar" role="toolbar" aria-label="Reference object member selection">
+              <button id="object-preview-zoom-in" type="button" class="compact-button">+</button>
+              <button id="object-preview-zoom-out" type="button" class="compact-button">−</button>
+              <button id="object-preview-fit" type="button" class="compact-button">Fit</button>
+              <button id="object-preview-expand" type="button" class="compact-button">Expand</button>
+            </div>
+            <p id="reference-object-preview-label" class="supporting-text"></p>
+            <svg id="reference-object-preview" role="img" aria-label="Selectable reference geometry preview"></svg>
+            <p class="supporting-text">Click geometry to add or remove it from the selected object. This changes only the review definition, never the DXF.</p>
+          </div>
           <div id="reference-objects-list" class="reference-objects-list"></div>
+          <label id="overlap-acknowledgment" class="overlap-acknowledgment" hidden>
+            <input id="overlap-ack-check" type="checkbox"> I acknowledge the displayed overlapping confirmed memberships.
+          </label>
           <button id="confirm-reference-objects" type="button" class="secondary-button">Confirm architectural objects</button>
           <p id="confirm-objects-status" class="supporting-text" role="status"></p>
         </div>

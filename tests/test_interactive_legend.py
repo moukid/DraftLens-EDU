@@ -366,7 +366,7 @@ def test_pdf_report_export_is_independent_of_browser_filter_and_retains_complete
     # Generate review via /api/review
     resp = client.post(
         "/api/review",
-        data={"allow_fallback": "true"},
+        data={"allow_fallback": "true", "grade_anyway": "true"},
         files={
             "reference": ("ref.dxf", ref.read_bytes(), "application/dxf"),
             "student": ("stud.dxf", stud.read_bytes(), "application/dxf")

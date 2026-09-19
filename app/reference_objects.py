@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import math
+import re
 from typing import Any, Literal
 
 from .models import Drawing, Entity
@@ -25,6 +26,8 @@ DEFAULT_CODE_MAPPINGS: dict[str, str] = {
 
 ObjectStatus = Literal["detected", "proposed", "confirmed", "unresolved", "excluded"]
 CorrespondenceStatus = Literal["present", "partial", "missing", "uncertain"]
+
+MARKER_CODE_RE = re.compile(r"^[A-Z]{1,4}\d{1,3}$")
 
 
 @dataclass(slots=True)
@@ -148,9 +151,18 @@ def extract_reference_markers_and_legend(
             computed_legend_bboxes.append(lo.bbox)
 
     raw_markers: list[ReferenceMarker] = []
+    ignored_text: list[dict[str, Any]] = []
     for text_ent in text_entities:
-        code = str(text_ent.text or "").strip()
+        code = str(text_ent.text or "").strip().upper()
         if not code:
+            continue
+        if not MARKER_CODE_RE.fullmatch(code):
+            ignored_text.append({
+                "handle": text_ent.source_handle,
+                "layer": text_ent.layer,
+                "text": str(text_ent.text or ""),
+                "reason": "Text does not match the reference marker code format.",
+            })
             continue
         loc = text_ent.points[0] if text_ent.points else (0.0, 0.0)
 
@@ -206,6 +218,7 @@ def extract_reference_markers_and_legend(
         "legend_samples_count": len(legend_markers),
         "legend_tables_detected": len(legend_tables),
         "table_handles": [t.get("handle") for t in legend_tables if t.get("handle")],
+        "ignored_information_text": ignored_text,
     }
     return plan_markers, legend_markers, metadata
 
@@ -257,7 +270,12 @@ def build_proposed_reference_objects(
             combined_pts.extend([(marker.bounds[0], marker.bounds[1]), (marker.bounds[2], marker.bounds[3])])
         combined_bbox = _bbox_for_points(combined_pts) if combined_pts else marker.bounds
 
-        status: ObjectStatus = "proposed" if meaning and not meaning.startswith("Unmapped") else "unresolved"
+        if meaning.startswith("Unmapped"):
+            status: ObjectStatus = "unresolved"
+        elif member_ids:
+            status = "proposed"
+        else:
+            status = "detected"
 
         objects.append(
             ReferenceObject(
@@ -295,6 +313,7 @@ def build_proposed_reference_objects(
         "total_objects": len(objects),
         "counts_by_type": {code: code_counters[code] for code in sorted(code_counters)},
         "counts_by_status": {
+            "detected": sum(o.status == "detected" for o in objects),
             "proposed": sum(o.status == "proposed" for o in objects),
             "confirmed": sum(o.status == "confirmed" for o in objects),
             "unresolved": sum(o.status == "unresolved" for o in objects),

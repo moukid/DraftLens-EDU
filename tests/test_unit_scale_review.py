@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-import pytest
+import io
 
+import ezdxf
+import pytest
+from fastapi.testclient import TestClient
+from pypdf import PdfReader
+
+from app.main import app
 from app.models import Drawing, Entity
 from app.scale_diagnostics import ScaleDiagnostic
 from app.unit_scale_review import (
@@ -147,3 +153,97 @@ def test_matching_and_consistent():
     assert result.diagnostic_state == "matching_and_consistent"
     assert result.declared_units_differ is False
     assert result.requires_instructor_acknowledgment is False
+
+
+def _review_dxf_bytes(units: int) -> bytes:
+    doc = ezdxf.new("R2010")
+    doc.units = units
+    msp = doc.modelspace()
+    for start, end in (
+        ((0, 0), (100, 0)),
+        ((100, 0), (100, 50)),
+        ((100, 50), (0, 50)),
+        ((0, 50), (0, 0)),
+    ):
+        msp.add_line(start, end, dxfattribs={"layer": "WALLS"})
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode("utf-8")
+
+
+def test_api_withholds_final_grade_until_unit_difference_is_acknowledged():
+    client = TestClient(app)
+    reference = _review_dxf_bytes(ezdxf.units.MM)
+    student = _review_dxf_bytes(ezdxf.units.CM)
+    suggestion = client.post(
+        "/api/rubric/suggest",
+        files={"reference": ("reference.dxf", reference, "application/dxf")},
+    ).json()
+    suggestion["rubric"]["assignment_type"] = suggestion["suggested_assignment_type"]
+    approval = client.post(
+        "/api/rubric/approve",
+        json={"reference_id": suggestion["reference_id"], "rubric": suggestion["rubric"]},
+    )
+    assert approval.status_code == 200
+    rubric_id = approval.json()["rubric_id"]
+
+    withheld = client.post(
+        "/api/review",
+        data={"rubric_id": rubric_id},
+        files={
+            "reference": ("reference.dxf", reference, "application/dxf"),
+            "student": ("student.dxf", student, "application/dxf"),
+        },
+    )
+    assert withheld.status_code == 200
+    body = withheld.json()
+    assert body["grading_status"] == "withheld"
+    assert body["score"] is None
+    assert body["report_available"] is False
+    assert body["unit_scale_review"]["diagnostic_state"] == "declared_units_differ"
+    assert body["unit_scale_review"]["requires_instructor_acknowledgment"] is True
+    assert body["unit_scale_review"]["acknowledged"] is False
+
+    acknowledged = client.post(
+        "/api/review",
+        data={"rubric_id": rubric_id, "grade_anyway": "true"},
+        files={
+            "reference": ("reference.dxf", reference, "application/dxf"),
+            "student": ("student.dxf", student, "application/dxf"),
+        },
+    )
+    assert acknowledged.status_code == 200
+    acknowledged_body = acknowledged.json()
+    assert acknowledged_body["grading_status"] == "graded"
+    assert acknowledged_body["score"] == 100.0
+    assert acknowledged_body["report_available"] is True
+    assert acknowledged_body["unit_scale_review"]["acknowledged"] is True
+    report = client.get(
+        f"/api/reviews/{acknowledged_body['review_id']}/report.pdf"
+    )
+    assert report.status_code == 200
+    report_text = "\n".join(
+        page.extract_text() or ""
+        for page in PdfReader(io.BytesIO(report.content)).pages
+    )
+    normalized_report_text = " ".join(report_text.split())
+    assert "Instructor decision recorded" in normalized_report_text
+    assert "no source geometry was rescaled or modified" in normalized_report_text
+
+
+def test_api_rejects_approval_when_intended_unit_is_unspecified():
+    client = TestClient(app)
+    reference = _review_dxf_bytes(0)
+    suggestion = client.post(
+        "/api/rubric/suggest",
+        files={"reference": ("reference.dxf", reference, "application/dxf")},
+    ).json()
+    suggestion["rubric"]["assignment_type"] = suggestion["suggested_assignment_type"]
+
+    response = client.post(
+        "/api/rubric/approve",
+        json={"reference_id": suggestion["reference_id"], "rubric": suggestion["rubric"]},
+    )
+
+    assert response.status_code == 422
+    assert "intended assignment unit" in response.json()["detail"]

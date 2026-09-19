@@ -25,6 +25,11 @@ const state = {
   referenceObjects: [],
   referenceObjectsSummary: null,
   referenceObjectsConfirmed: false,
+  referenceObjectData: null,
+  referenceObjectInspectionToken: null,
+  availableReferenceEntities: [],
+  selectedReferenceObjectId: null,
+  referencePreviewView: null,
   declaredUnits: null,
 };
 
@@ -137,8 +142,12 @@ if (applyLegendFilterButton) {
   applyLegendFilterButton.addEventListener("click", async () => {
     if (!state.reference) return;
     const bboxVal = (byId("legend-bbox-input")?.value || "").trim();
+    const mappingsVal = (byId("code-mappings-input")?.value || "").trim();
+    const customLayersVal = (byId("custom-info-layers-input")?.value || "").trim();
     const form = uploadForm("reference", state.reference);
     if (bboxVal) form.append("legend_bbox", bboxVal);
+    if (mappingsVal) form.append("code_mappings", mappingsVal);
+    if (customLayersVal) form.append("custom_info_layers", customLayersVal);
     try {
       const resp = await requestJson("/api/reference/objects/inspect", {method: "POST", body: form});
       renderReferenceObjects(resp);
@@ -190,7 +199,15 @@ viewStudentButton.addEventListener("click", () => {
   setActiveRole("student");
   setDrawingViewMode("student");
 });
-gradeAnywayButton.addEventListener("click", () => runReview(true));
+gradeAnywayButton.addEventListener("click", () => {
+  const unitReview = state.review && state.review.unit_scale_review;
+  const ack = byId("unit-scale-ack-check");
+  if (unitReview && unitReview.requires_instructor_acknowledgment && ack && !ack.checked) {
+    showError(new Error("Acknowledge the unit/scale decision before grading anyway."));
+    return;
+  }
+  runReview(true);
+});
 chooseAnotherFileButton.addEventListener("click", () => studentInput.click());
 
 if (editSetupButton) {
@@ -539,6 +556,16 @@ function resetReferenceDependentState() {
   state.suggestedAssignmentType = null;
   state.provisionalRubric = null;
   state.rubricId = null;
+  state.referenceObjects = [];
+  state.referenceObjectsSummary = null;
+  state.referenceObjectsConfirmed = false;
+  state.referenceObjectData = null;
+  state.referenceObjectInspectionToken = null;
+  state.availableReferenceEntities = [];
+  state.selectedReferenceObjectId = null;
+  state.referencePreviewView = null;
+  const objectPanel = byId("reference-objects-panel");
+  if (objectPanel) objectPanel.hidden = true;
   state.student = null;
   studentInput.value = "";
   byId("student-name").textContent = "Choose a .dxf file";
@@ -1145,7 +1172,7 @@ function renderUnitScaleReview(review) {
   const card = byId("unit-scale-warning-card");
   if (!card) return;
   const unitReview = review.unit_scale_review;
-  if (!unitReview || (!unitReview.prominent_notice && unitReview.state === "matching_and_consistent")) {
+  if (!unitReview || (!unitReview.prominent_notice && unitReview.diagnostic_state === "matching_and_consistent")) {
     card.hidden = true;
     return;
   }
@@ -1153,26 +1180,35 @@ function renderUnitScaleReview(review) {
   card.hidden = false;
   const chip = byId("unit-scale-state-chip");
   if (chip) {
-    chip.textContent = humanize(unitReview.state || "Unit Review");
+    chip.textContent = humanize(unitReview.diagnostic_state || "unit_review");
     chip.className = "status-pill " + (unitReview.prominent_notice ? "warning" : "neutral");
   }
 
   const expl = byId("unit-scale-explanation");
-  if (expl) expl.textContent = unitReview.explanation || "";
+  if (expl) {
+    const decisionText = unitReview.acknowledged
+      ? " Instructor decision recorded: notice acknowledged; no source geometry was rescaled or modified."
+      : "";
+    expl.textContent = (unitReview.prominent_notice || unitReview.factor_direction_explanation || "") + decisionText;
+  }
 
-  byId("unit-scale-ref-units").textContent = unitReview.reference_declared_units || "unspecified";
-  byId("unit-scale-stu-units").textContent = unitReview.student_declared_units || "unspecified";
+  byId("unit-scale-ref-units").textContent = unitReview.reference_declared_unit || "unspecified";
+  byId("unit-scale-stu-units").textContent = unitReview.student_declared_unit || "unspecified";
   byId("unit-scale-intended-units").textContent = unitReview.intended_unit || "unspecified";
-  byId("unit-scale-factor").textContent = unitReview.geometric_scale_factor
-    ? formatNumber(unitReview.geometric_scale_factor) + "x"
+  byId("unit-scale-factor").textContent = unitReview.estimated_scale_factor !== null
+    && unitReview.estimated_scale_factor !== undefined
+    ? formatNumber(unitReview.estimated_scale_factor) + "x"
     : "Not detected";
 
   const ackBox = byId("unit-scale-ack-box");
+  const ackCheck = byId("unit-scale-ack-check");
   if (ackBox) {
-    ackBox.hidden = !unitReview.requires_instructor_acknowledgment;
+    ackBox.hidden = !unitReview.requires_instructor_acknowledgment || unitReview.acknowledged;
+  }
+  if (ackCheck) {
+    ackCheck.checked = Boolean(unitReview.acknowledged);
   }
 }
-
 function renderObjectCorrespondence(review) {
   const card = byId("object-correspondence-card");
   if (!card) return;
@@ -1223,9 +1259,175 @@ function renderObjectCorrespondence(review) {
   });
 }
 
+function referenceEntityId(entity) {
+  return entity && (entity.internal_id || entity.id);
+}
+
+function currentReferenceObject() {
+  return state.referenceObjects.find((obj) => obj.occurrence_id === state.selectedReferenceObjectId) || null;
+}
+
+function objectMembershipOverlaps(objects = state.referenceObjects) {
+  const memberships = new Map();
+  objects.filter((obj) => obj.status !== "excluded" && Array.isArray(obj.member_entity_ids)).forEach((obj) => {
+    obj.member_entity_ids.forEach((entityId) => {
+      if (!memberships.has(entityId)) memberships.set(entityId, []);
+      memberships.get(entityId).push(obj.occurrence_id);
+    });
+  });
+  return Array.from(memberships.entries())
+    .filter(([, occurrenceIds]) => occurrenceIds.length > 1)
+    .map(([entityId, occurrenceIds]) => ({entityId, occurrenceIds}));
+}
+
+function applyReferencePreviewView() {
+  const svg = byId("reference-object-preview");
+  const view = state.referencePreviewView;
+  if (!svg || !view) return;
+  svg.setAttribute("viewBox", view.x + " " + view.y + " " + view.width + " " + view.height);
+}
+
+function fitReferenceObjectPreview() {
+  const bbox = state.referenceObjectData && state.referenceObjectData.reference_bbox;
+  if (!Array.isArray(bbox) || bbox.length < 4) return;
+  const width = Math.max(Number(bbox[2]) - Number(bbox[0]), 1);
+  const height = Math.max(Number(bbox[3]) - Number(bbox[1]), 1);
+  const padding = Math.max(width, height) * 0.05;
+  state.referencePreviewView = {
+    x: Number(bbox[0]) - padding,
+    y: -Number(bbox[3]) - padding,
+    width: width + padding * 2,
+    height: height + padding * 2,
+  };
+  applyReferencePreviewView();
+}
+
+function zoomReferenceObjectPreview(factor) {
+  if (!state.referencePreviewView) fitReferenceObjectPreview();
+  const view = state.referencePreviewView;
+  if (!view) return;
+  const nextWidth = view.width * factor;
+  const nextHeight = view.height * factor;
+  view.x += (view.width - nextWidth) / 2;
+  view.y += (view.height - nextHeight) / 2;
+  view.width = nextWidth;
+  view.height = nextHeight;
+  applyReferencePreviewView();
+}
+
+function drawReferenceObjectPreview() {
+  const panel = byId("reference-object-preview-panel");
+  const svg = byId("reference-object-preview");
+  const selected = currentReferenceObject();
+  if (!panel || !svg || !selected || !state.availableReferenceEntities.length) {
+    if (panel) panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  clearChildren(svg);
+  const selectedIds = new Set(selected.member_entity_ids || []);
+  const namespace = "http://www.w3.org/2000/svg";
+
+  state.availableReferenceEntities.forEach((entity) => {
+    const entityId = referenceEntityId(entity);
+    const geometry = entity.geometry || {};
+    const points = Array.isArray(geometry.points) ? geometry.points : [];
+    let graphic;
+    if (entity.entity_type === "LINE" && points.length >= 2) {
+      graphic = document.createElementNS(namespace, "line");
+      graphic.setAttribute("x1", points[0][0]);
+      graphic.setAttribute("y1", -points[0][1]);
+      graphic.setAttribute("x2", points[1][0]);
+      graphic.setAttribute("y2", -points[1][1]);
+    } else if (entity.entity_type === "CIRCLE" && points.length && Number.isFinite(Number(geometry.radius))) {
+      graphic = document.createElementNS(namespace, "circle");
+      graphic.setAttribute("cx", points[0][0]);
+      graphic.setAttribute("cy", -points[0][1]);
+      graphic.setAttribute("r", geometry.radius);
+    } else if (points.length > 1) {
+      graphic = document.createElementNS(namespace, entity.closed ? "polygon" : "polyline");
+      graphic.setAttribute("points", points.map((point) => point[0] + "," + (-point[1])).join(" "));
+    } else if (points.length) {
+      graphic = document.createElementNS(namespace, "circle");
+      graphic.setAttribute("cx", points[0][0]);
+      graphic.setAttribute("cy", -points[0][1]);
+      graphic.setAttribute("r", Math.max((state.referencePreviewView?.width || 100) * 0.004, 0.5));
+    } else {
+      return;
+    }
+    graphic.classList.add("reference-preview-entity");
+    if (selectedIds.has(entityId)) graphic.classList.add("is-member");
+    graphic.dataset.entityId = entityId;
+    const title = document.createElementNS(namespace, "title");
+    title.textContent = entityId + " · " + entity.entity_type + " · layer " + entity.layer;
+    graphic.append(title);
+    graphic.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (selected.status === "excluded") return;
+      const members = new Set(selected.member_entity_ids || []);
+      if (members.has(entityId)) members.delete(entityId);
+      else members.add(entityId);
+      selected.member_entity_ids = Array.from(members);
+      selected.status = selected.member_entity_ids.length
+        ? (String(selected.meaning).startsWith("Unmapped (") ? "unresolved" : "proposed")
+        : "detected";
+      state.referenceObjectsConfirmed = false;
+      renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
+    });
+    svg.append(graphic);
+  });
+
+  const marker = document.createElementNS(namespace, "circle");
+  marker.classList.add("reference-preview-marker");
+  marker.setAttribute("cx", selected.marker_location[0]);
+  marker.setAttribute("cy", -selected.marker_location[1]);
+  marker.setAttribute("r", Math.max((state.referencePreviewView?.width || 100) * 0.006, 0.8));
+  svg.append(marker);
+  byId("reference-object-preview-label").textContent =
+    selected.occurrence_id + ": " + selected.member_entity_ids.length + " selected member(s).";
+
+  if (!state.referencePreviewView) fitReferenceObjectPreview();
+  applyReferencePreviewView();
+
+  byId("object-preview-zoom-in").onclick = () => zoomReferenceObjectPreview(0.8);
+  byId("object-preview-zoom-out").onclick = () => zoomReferenceObjectPreview(1.25);
+  byId("object-preview-fit").onclick = fitReferenceObjectPreview;
+  byId("object-preview-expand").onclick = () => {
+    panel.classList.toggle("is-expanded");
+    byId("object-preview-expand").textContent = panel.classList.contains("is-expanded") ? "Exit" : "Expand";
+  };
+
+  let drag = null;
+  svg.onpointerdown = (event) => {
+    if (event.target !== svg) return;
+    drag = {x: event.clientX, y: event.clientY, view: {...state.referencePreviewView}};
+    svg.setPointerCapture(event.pointerId);
+  };
+  svg.onpointermove = (event) => {
+    if (!drag || !state.referencePreviewView) return;
+    const rect = svg.getBoundingClientRect();
+    state.referencePreviewView.x = drag.view.x - (event.clientX - drag.x) * drag.view.width / Math.max(rect.width, 1);
+    state.referencePreviewView.y = drag.view.y - (event.clientY - drag.y) * drag.view.height / Math.max(rect.height, 1);
+    applyReferencePreviewView();
+  };
+  svg.onpointerup = () => { drag = null; };
+  svg.onwheel = (event) => {
+    event.preventDefault();
+    zoomReferenceObjectPreview(event.deltaY < 0 ? 0.9 : 1.1);
+  };
+}
+
 function renderReferenceObjects(data) {
   const panel = byId("reference-objects-panel");
   if (!panel) return;
+  if (data && data.inspection_token) {
+    state.referenceObjectData = data;
+    state.referenceObjectInspectionToken = data.inspection_token;
+    state.availableReferenceEntities = data.available_entities || [];
+    state.referencePreviewView = null;
+  } else if (state.referenceObjectData) {
+    data = {...state.referenceObjectData, ...(data || {})};
+  }
   const objects = data && data.objects ? data.objects : [];
   const planMarkers = data && data.plan_markers ? data.plan_markers : [];
   const legendMarkers = data && data.legend_markers ? data.legend_markers : [];
@@ -1233,7 +1435,11 @@ function renderReferenceObjects(data) {
 
   state.referenceObjects = objects;
   state.referenceObjectsSummary = summary;
-  state.referenceObjectsConfirmed = false;
+  state.referenceObjectsConfirmed = objects.length > 0
+    && objects.every((obj) => ["confirmed", "unresolved", "excluded"].includes(obj.status));
+  if (!objects.some((obj) => obj.occurrence_id === state.selectedReferenceObjectId)) {
+    state.selectedReferenceObjectId = objects.length ? objects[0].occurrence_id : null;
+  }
 
   if (planMarkers.length === 0 && legendMarkers.length === 0 && objects.length === 0) {
     panel.hidden = true;
@@ -1243,88 +1449,158 @@ function renderReferenceObjects(data) {
   panel.hidden = false;
   byId("reference-objects-count").textContent = String(objects.length);
   byId("reference-objects-description").textContent =
-    `Detected ${planMarkers.length} plan marker(s) and ${legendMarkers.length} legend sample(s).`;
+    "Detected " + planMarkers.length + " plan marker(s), " + legendMarkers.length
+    + " legend sample(s), and " + objects.filter((obj) => obj.status === "confirmed").length
+    + " confirmed object(s).";
 
   const legendFilter = byId("reference-objects-legend-filter");
-  if (legendFilter) {
-    legendFilter.hidden = false;
-  }
+  if (legendFilter) legendFilter.hidden = false;
 
+  const overlaps = objectMembershipOverlaps(objects);
   const overlapWarning = byId("overlapping-members-warning");
-  if (overlapWarning) {
-    overlapWarning.hidden = !(summary && summary.has_overlapping_memberships);
-  }
+  if (overlapWarning) overlapWarning.hidden = overlaps.length === 0;
+  const overlapAck = byId("overlap-acknowledgment");
+  if (overlapAck) overlapAck.hidden = overlaps.length === 0;
 
   const list = byId("reference-objects-list");
   clearChildren(list);
 
   objects.forEach((obj) => {
     const card = document.createElement("div");
-    card.className = "reference-object-card " + (obj.status === "unresolved" ? "is-unresolved" : obj.status === "excluded" ? "is-excluded" : "");
+    card.className = "reference-object-card "
+      + (obj.status === "unresolved" ? "is-unresolved " : obj.status === "excluded" ? "is-excluded " : "")
+      + (obj.occurrence_id === state.selectedReferenceObjectId ? "is-selected" : "");
 
     const meta = document.createElement("div");
     meta.className = "reference-object-meta";
-
     const title = document.createElement("strong");
-    title.textContent = `${obj.occurrence_id} (${obj.meaning})`;
+    title.textContent = obj.occurrence_id + " (" + obj.meaning + ")";
     meta.append(title);
-
     const detail = document.createElement("span");
-    detail.textContent = `${obj.member_entity_ids.length} member entity(ies) proposed. Status: ${obj.status}.`;
-    if (obj.shared_entity_ids && obj.shared_entity_ids.length > 0) {
-      detail.textContent += ` [Shared geometry warning: ${obj.shared_entity_ids.length} shared entity(ies)]`;
-      detail.style.color = "#b45309";
-    }
+    detail.textContent = obj.member_entity_ids.length + " member entity(ies). Status: " + obj.status + ".";
     meta.append(detail);
+
+    if (obj.occurrence_id === state.selectedReferenceObjectId) {
+      const members = document.createElement("ul");
+      members.className = "reference-object-members";
+      (obj.member_entity_ids || []).forEach((entityId) => {
+        const item = document.createElement("li");
+        item.textContent = entityId + " ";
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "compact-button";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+          obj.member_entity_ids = obj.member_entity_ids.filter((id) => id !== entityId);
+          obj.status = obj.member_entity_ids.length ? "proposed" : "detected";
+          state.referenceObjectsConfirmed = false;
+          renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
+        });
+        item.append(remove);
+        members.append(item);
+      });
+      if (!members.children.length) {
+        const empty = document.createElement("li");
+        empty.textContent = "No members selected. Click reference geometry in the preview.";
+        members.append(empty);
+      }
+      meta.append(members);
+      const notes = document.createElement("input");
+      notes.type = "text";
+      notes.maxLength = 500;
+      notes.placeholder = "Instructor notes (optional)";
+      notes.value = obj.notes || "";
+      notes.addEventListener("input", () => { obj.notes = notes.value; });
+      meta.append(notes);
+    }
     card.append(meta);
 
     const actions = document.createElement("div");
     actions.className = "reference-object-actions";
+    const inspectBtn = document.createElement("button");
+    inspectBtn.type = "button";
+    inspectBtn.className = "secondary-button compact-button";
+    inspectBtn.textContent = obj.occurrence_id === state.selectedReferenceObjectId ? "Selected" : "Inspect";
+    inspectBtn.addEventListener("click", () => {
+      state.selectedReferenceObjectId = obj.occurrence_id;
+      renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
+    });
+    actions.append(inspectBtn);
 
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "secondary-button compact-button";
     toggleBtn.textContent = obj.status === "excluded" ? "Include" : "Exclude";
     toggleBtn.addEventListener("click", () => {
-      obj.status = obj.status === "excluded" ? "proposed" : "excluded";
-      renderReferenceObjects({objects, plan_markers: planMarkers, legend_markers: legendMarkers, summary});
+      if (obj.status === "excluded") {
+        obj.status = String(obj.meaning).startsWith("Unmapped (")
+          ? "unresolved"
+          : (obj.member_entity_ids.length ? "proposed" : "detected");
+        obj.exclusion_reason = null;
+      } else {
+        obj.status = "excluded";
+        obj.exclusion_reason = "Excluded by instructor during reference-object review.";
+      }
+      state.referenceObjectsConfirmed = false;
+      renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
     });
     actions.append(toggleBtn);
     card.append(actions);
-
     list.append(card);
   });
 
-  byId("confirm-objects-status").textContent = "Review candidate objects and confirm before grading.";
+  drawReferenceObjectPreview();
+  byId("confirm-objects-status").textContent = state.referenceObjectsConfirmed
+    ? "Saved object definitions reopened for this reference and information configuration."
+    : "Review each marker, adjust members, then confirm or leave it unresolved/excluded.";
 }
 
 async function confirmReferenceObjects() {
-  if (!state.referenceId || !state.referenceObjects.length) return;
+  if (!state.referenceId || !state.referenceObjects.length || !state.referenceObjectInspectionToken) return;
   const statusEl = byId("confirm-objects-status");
-  statusEl.textContent = "Confirming architectural objects...";
+  statusEl.textContent = "Validating architectural object definitions...";
   try {
     state.referenceObjects.forEach((obj) => {
-      if (obj.status !== "excluded") {
+      if (obj.status === "excluded") return;
+      if (!obj.member_entity_ids.length || String(obj.meaning).startsWith("Unmapped (")) {
+        obj.status = "unresolved";
+      } else {
         obj.status = "confirmed";
       }
     });
+    const overlaps = objectMembershipOverlaps(state.referenceObjects.filter((obj) => obj.status === "confirmed"));
+    const overlapCheck = byId("overlap-ack-check");
+    if (overlaps.length && (!overlapCheck || !overlapCheck.checked)) {
+      throw new Error("Acknowledge overlapping memberships before confirmation.");
+    }
 
     const resp = await requestJson("/api/reference/objects/confirm", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         reference_id: state.referenceId,
+        inspection_token: state.referenceObjectInspectionToken,
+        rubric_id: state.rubricId,
+        overlap_acknowledged: Boolean(overlaps.length && overlapCheck && overlapCheck.checked),
         objects: state.referenceObjects,
       }),
     });
+    state.referenceObjects = resp.objects;
     state.referenceObjectsConfirmed = true;
-    statusEl.textContent = `Confirmed ${resp.confirmed_count} architectural object(s).`;
-    setWorkflowStatus("Architectural objects confirmed", "success");
+    if (resp.approval_invalidated) {
+      state.rubricId = null;
+      if (state.provisionalRubric) state.provisionalRubric.approved = false;
+      byId("rubric-status").textContent = "Object-definition changes require renewed rubric approval.";
+      updateReviewAvailability();
+    }
+    renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
+    statusEl.textContent = "Saved " + resp.confirmed_count + " confirmed, "
+      + resp.unresolved_count + " unresolved, and " + resp.excluded_count + " excluded marker(s).";
+    setWorkflowStatus("Architectural object definitions saved", "success");
   } catch (err) {
     statusEl.textContent = "Failed to confirm objects: " + err.message;
   }
 }
-
 function findingRole(issue) {
   if (issue.finding_role) return issue.finding_role;
   if (issue.category === "unsupported_entity") return "unsupported";

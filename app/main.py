@@ -1,5 +1,5 @@
 from __future__ import annotations
-import html,os,uuid
+import hashlib,html,json,os,uuid
 from dataclasses import dataclass
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -14,10 +14,11 @@ from .feedback import generate_feedback
 from .pdf_report import content_disposition, generate_pdf
 from .reference_objects import (
     DEFAULT_CODE_MAPPINGS,
+    MARKER_CODE_RE,
     build_proposed_reference_objects,
     extract_reference_markers_and_legend,
 )
-from .review_service import GradingPipelineOutput, PipelineContractError, build_review_artifacts, compatibility_message, normalization_decision, reference_fingerprint, run_grading_pipeline
+from .review_service import GradingPipelineOutput, PipelineContractError, build_review_artifacts, compatibility_message, normalization_decision, review_withholding_message, reference_fingerprint, run_grading_pipeline
 from .review_snapshot import (
     ReviewSnapshotStore, SnapshotCapacityError, SnapshotExpired, SnapshotNotFound,
     StudentMetadataError, normalize_student_metadata,
@@ -32,7 +33,8 @@ app=FastAPI(title="DraftLens EDU",version="0.2.0"); app.mount("/static",StaticFi
 RUBRICS: dict[str, Rubric] = {}
 REFERENCE_RUBRICS: dict[str, str] = {}
 RUBRIC_REFERENCES: dict[str, str] = {}
-REFERENCE_OBJECTS: dict[str, list[dict[str, Any]]] = {}
+REFERENCE_OBJECTS: dict[str, dict[str, Any]] = {}
+REFERENCE_OBJECT_INSPECTIONS: dict[str, dict[str, Any]] = {}
 REVIEW_SNAPSHOTS = ReviewSnapshotStore()
 
 @dataclass(frozen=True, slots=True)
@@ -52,8 +54,10 @@ class RubricApprovalRequest(BaseModel):
 
 class ObjectConfirmationRequest(BaseModel):
     reference_id: str = Field(min_length=64, max_length=64)
+    inspection_token: str = Field(min_length=64, max_length=64)
+    rubric_id: str | None = None
     objects: list[dict[str, Any]]
-    legend_config: dict[str, Any] | None = None
+    overlap_acknowledged: bool = False
 
 
 ObjectConfirmationRequest.model_rebuild()
@@ -87,7 +91,18 @@ async def run_uploaded_pipeline(
     reference_bytes = await read_upload(reference)
     student_bytes = await read_upload(student)
     ref_id = reference_fingerprint(reference_bytes)
-    confirmed_objects = REFERENCE_OBJECTS.get(ref_id)
+    selected_assignment_id = rubric_id or REFERENCE_RUBRICS.get(ref_id)
+    object_record = REFERENCE_OBJECTS.get(ref_id)
+    confirmed_objects = (
+        object_record["objects"]
+        if object_record and object_record.get("rubric_id") == selected_assignment_id
+        else None
+    )
+    custom_info_layers = (
+        set(object_record.get("configuration", {}).get("custom_info_layers", []))
+        if confirmed_objects is not None
+        else None
+    )
     if rubric and rubric.filename:
         raise HTTPException(409, "Inline rubric uploads are no longer accepted. Approve and associate the rubric before grading.")
     try:
@@ -106,6 +121,8 @@ async def run_uploaded_pipeline(
             rubric_references=RUBRIC_REFERENCES,
             instructor_override=instructor_override,
             confirmed_reference_objects=confirmed_objects,
+            custom_info_layers=custom_info_layers,
+            enforce_unit_decision=True,
         )
         return UploadedPipelineResult(
             output=output,
@@ -155,10 +172,11 @@ async def grade(
         "normalization_mode": output.rubric.normalization_mode,
         "normalization_decision": normalization_decision(output),
         "grading_status": (
-            "withheld" if output.compatibility.grading_withheld else "graded"
+            "withheld" if output.grading_withheld else "graded"
         ),
         "compatibility": output.compatibility.to_dict(),
         **output.compatibility.to_dict(),
+        "grading_withheld": output.grading_withheld,
         "scale_diagnostic": output.scale_diagnostic.to_dict(),
         **output.scale_diagnostic.to_dict(),
         **rubric_contract(output.rubric),
@@ -169,8 +187,8 @@ async def grade(
         result["reference_objects_summary"] = output.reference_objects_summary
     if output.student_object_correspondence is not None:
         result["student_object_correspondence"] = output.student_object_correspondence
-    if output.compatibility.grading_withheld:
-        message = compatibility_message(output)
+    if output.grading_withheld:
+        message = review_withholding_message(output)
         result["compatibility_message"] = message
         result["available_actions"] = (
             ["choose_another_file", "grade_anyway"]
@@ -208,7 +226,7 @@ async def review(
     except StudentMetadataError as exc:
         raise HTTPException(422, str(exc)) from exc
     artifacts = build_review_artifacts(uploaded.output)
-    if uploaded.output.compatibility.grading_withheld:
+    if uploaded.output.grading_withheld:
         return artifacts.response
     try:
         snapshot = REVIEW_SNAPSHOTS.create(
@@ -261,6 +279,8 @@ async def assignment_analyze(reference: UploadFile = File(...)):
 async def reference_objects_inspect(
     reference: UploadFile = File(...),
     legend_bbox: str | None = Form(None),
+    code_mappings: str | None = Form(None),
+    custom_info_layers: str | None = Form(None),
 ):
     reference_bytes = await read_upload(reference)
     ref_id = reference_fingerprint(reference_bytes)
@@ -269,48 +289,240 @@ async def reference_objects_inspect(
     if legend_bbox:
         try:
             parts = [float(x.strip()) for x in legend_bbox.split(",")]
-            if len(parts) == 4:
-                legend_region = (parts[0], parts[1], parts[2], parts[3])
-        except Exception:
-            legend_region = None
+        except ValueError as exc:
+            raise HTTPException(422, "Legend exclusion region must contain four numeric coordinates.") from exc
+        if len(parts) != 4 or parts[0] >= parts[2] or parts[1] >= parts[3]:
+            raise HTTPException(422, "Legend exclusion region must be x_min, y_min, x_max, y_max.")
+        legend_region = (parts[0], parts[1], parts[2], parts[3])
 
-    full_drawing = parse_dxf_bytes(reference_bytes, source="reference", normalize=False, exclude_info_layers=False)
-    base_drawing = parse_dxf_bytes(reference_bytes, source="reference", normalize=False, exclude_info_layers=True)
+    mappings: dict[str, str] = {}
+    if code_mappings:
+        try:
+            parsed_mappings = json.loads(code_mappings)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(422, "Code mappings must be a JSON object such as {\"X1\":\"Custom object\"}.") from exc
+        if not isinstance(parsed_mappings, dict):
+            raise HTTPException(422, "Code mappings must be a JSON object.")
+        for raw_code, raw_meaning in parsed_mappings.items():
+            code = str(raw_code).strip().upper()
+            meaning = str(raw_meaning).strip()
+            if not MARKER_CODE_RE.fullmatch(code) or not meaning or len(meaning) > 80:
+                raise HTTPException(422, f"Invalid code mapping for {raw_code!r}.")
+            mappings[code] = meaning
+
+    custom_layers = {
+        layer.strip()
+        for layer in (custom_info_layers or "").split(",")
+        if layer.strip()
+    }
+
+    full_drawing = parse_dxf_bytes(
+        reference_bytes,
+        source="reference",
+        normalize=False,
+        exclude_info_layers=False,
+    )
+    base_drawing = parse_dxf_bytes(
+        reference_bytes,
+        source="reference",
+        normalize=False,
+        exclude_info_layers=True,
+        custom_info_layers=custom_layers,
+    )
 
     plan_markers, legend_markers, meta = extract_reference_markers_and_legend(
         full_drawing.entities,
         full_drawing.unsupported_entities,
+        custom_info_layers=custom_layers,
+        code_mappings=mappings,
         legend_region_bbox=legend_region,
     )
     objects, summary = build_proposed_reference_objects(
         plan_markers,
         base_drawing.entities,
+        code_mappings=mappings,
     )
+    configuration = {
+        "legend_region": legend_region,
+        "code_mappings": mappings,
+        "custom_info_layers": sorted(custom_layers, key=str.lower),
+    }
+    inspection_token = hashlib.sha256(
+        (ref_id + json.dumps(configuration, sort_keys=True, separators=(",", ":"))).encode("utf-8")
+    ).hexdigest()
+    proposals = {obj.occurrence_id: obj.to_dict() for obj in objects}
+    entity_by_id = {entity.id: entity for entity in base_drawing.entities}
+    REFERENCE_OBJECT_INSPECTIONS[ref_id] = {
+        "inspection_token": inspection_token,
+        "configuration": configuration,
+        "proposals": proposals,
+        "entity_by_id": entity_by_id,
+    }
+
+    stored = REFERENCE_OBJECTS.get(ref_id)
+    object_payload = (
+        stored["objects"]
+        if stored and stored.get("inspection_token") == inspection_token
+        else [obj.to_dict() for obj in objects]
+    )
+    if stored and stored.get("inspection_token") == inspection_token:
+        summary["counts_by_status"] = {
+            status: sum(obj.get("status") == status for obj in object_payload)
+            for status in ("detected", "proposed", "confirmed", "unresolved", "excluded")
+        }
+
     return {
         "reference_id": ref_id,
+        "inspection_token": inspection_token,
         "declared_units": full_drawing.units,
         "units_code": full_drawing.units_code,
-        "plan_markers": [m.to_dict() for m in plan_markers],
-        "legend_markers": [m.to_dict() for m in legend_markers],
-        "objects": [o.to_dict() for o in objects],
+        "plan_markers": [marker.to_dict() for marker in plan_markers],
+        "legend_markers": [marker.to_dict() for marker in legend_markers],
+        "objects": object_payload,
         "summary": summary,
         "metadata": meta,
-        "legend_region_applied": legend_region,
+        "configuration": configuration,
+        "reference_bbox": list(base_drawing.bbox),
+        "available_entities": [entity.to_dict() for entity in base_drawing.entities],
     }
+
 
 @app.post("/api/reference/objects/confirm")
 def reference_objects_confirm(request: ObjectConfirmationRequest):
-    REFERENCE_OBJECTS[request.reference_id] = request.objects
-    confirmed_count = sum(o.get("status") == "confirmed" for o in request.objects)
-    unresolved_count = sum(o.get("status") == "unresolved" for o in request.objects)
-    excluded_count = sum(o.get("status") == "excluded" for o in request.objects)
+    inspection = REFERENCE_OBJECT_INSPECTIONS.get(request.reference_id)
+    if inspection is None:
+        raise HTTPException(409, "Inspect this exact reference before confirming object definitions.")
+    if inspection["inspection_token"] != request.inspection_token:
+        raise HTTPException(409, "The object proposal is stale. Reinspect the reference before confirming.")
+
+    current_rubric_id = REFERENCE_RUBRICS.get(request.reference_id)
+    if request.rubric_id != current_rubric_id:
+        raise HTTPException(409, "The object definitions are not associated with the current assignment approval.")
+
+    proposals: dict[str, dict[str, Any]] = inspection["proposals"]
+    submitted_ids = [str(obj.get("occurrence_id", "")) for obj in request.objects]
+    if len(submitted_ids) != len(set(submitted_ids)) or set(submitted_ids) != set(proposals):
+        raise HTTPException(422, "Submit every inspected marker exactly once; object identities cannot be added or removed.")
+
+    valid_member_ids = set(inspection["entity_by_id"])
+    confirmed_membership: dict[str, list[str]] = {}
+    sanitized_objects: list[dict[str, Any]] = []
+    for submitted in request.objects:
+        occurrence_id = str(submitted["occurrence_id"])
+        proposal = proposals[occurrence_id]
+        status = str(submitted.get("status", "unresolved"))
+        if status not in {"confirmed", "unresolved", "excluded"}:
+            raise HTTPException(422, f"{occurrence_id} must be confirmed, unresolved, or excluded.")
+
+        raw_members = submitted.get("member_entity_ids", [])
+        if not isinstance(raw_members, list) or any(not isinstance(member_id, str) for member_id in raw_members):
+            raise HTTPException(422, f"{occurrence_id} has an invalid member list.")
+        member_ids = list(dict.fromkeys(raw_members))
+        foreign_ids = sorted(set(member_ids) - valid_member_ids)
+        if foreign_ids:
+            raise HTTPException(422, f"{occurrence_id} contains member IDs outside this reference: {', '.join(foreign_ids[:3])}.")
+        if status == "confirmed" and not member_ids:
+            raise HTTPException(422, f"{occurrence_id} cannot be confirmed without reference geometry.")
+        if status == "confirmed" and str(proposal["meaning"]).startswith("Unmapped ("):
+            raise HTTPException(422, f"{occurrence_id} requires an instructor code mapping before confirmation.")
+
+        if status == "confirmed":
+            for member_id in member_ids:
+                confirmed_membership.setdefault(member_id, []).append(occurrence_id)
+        entity_by_id = inspection["entity_by_id"]
+        selected_boxes = [
+            entity_by_id[member_id].bbox
+            for member_id in member_ids
+            if entity_by_id[member_id].bbox is not None
+        ]
+        selected_bounds = (
+            {
+                "min_x": min(box[0] for box in selected_boxes),
+                "min_y": min(box[1] for box in selected_boxes),
+                "max_x": max(box[2] for box in selected_boxes),
+                "max_y": max(box[3] for box in selected_boxes),
+            }
+            if selected_boxes
+            else None
+        )
+        sanitized_objects.append({
+            "occurrence_id": occurrence_id,
+            "type_code": proposal["type_code"],
+            "meaning": proposal["meaning"],
+            "marker_location": proposal["marker_location"],
+            "member_entity_ids": member_ids,
+            "member_handles": [
+                entity_by_id[member_id].source_handle
+                for member_id in member_ids
+                if entity_by_id[member_id].source_handle
+            ],
+            "bounds": selected_bounds,
+            "status": status,
+            "exclusion_reason": (
+                str(submitted.get("exclusion_reason") or "").strip()[:240]
+                if status == "excluded"
+                else None
+            ),
+            "notes": str(submitted.get("notes") or "").strip()[:500],
+            "shared_entity_ids": [],
+        })
+
+    overlaps = {
+        member_id: occurrence_ids
+        for member_id, occurrence_ids in confirmed_membership.items()
+        if len(occurrence_ids) > 1
+    }
+    if overlaps and not request.overlap_acknowledged:
+        raise HTTPException(409, "Overlapping confirmed memberships require explicit instructor acknowledgment.")
+    for obj in sanitized_objects:
+        obj["shared_entity_ids"] = sorted(
+            member_id
+            for member_id, occurrence_ids in overlaps.items()
+            if obj["occurrence_id"] in occurrence_ids
+        )
+
+    definition_revision = hashlib.sha256(
+        json.dumps(sanitized_objects, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    previous = REFERENCE_OBJECTS.get(request.reference_id)
+    unchanged = bool(
+        previous
+        and previous.get("definition_revision") == definition_revision
+        and previous.get("inspection_token") == request.inspection_token
+    )
+    approval_invalidated = bool(current_rubric_id and not unchanged)
+    if approval_invalidated:
+        approved_rubric = RUBRICS.get(current_rubric_id)
+        if approved_rubric is not None:
+            RUBRICS[current_rubric_id] = approved_rubric.model_copy(update={"approved": False})
+        REFERENCE_RUBRICS.pop(request.reference_id, None)
+        current_rubric_id = None
+
+    REFERENCE_OBJECTS[request.reference_id] = {
+        "reference_id": request.reference_id,
+        "rubric_id": current_rubric_id,
+        "inspection_token": request.inspection_token,
+        "configuration": inspection["configuration"],
+        "definition_revision": definition_revision,
+        "overlap_acknowledged": bool(overlaps and request.overlap_acknowledged),
+        "objects": sanitized_objects,
+    }
+    counts = {
+        status: sum(obj["status"] == status for obj in sanitized_objects)
+        for status in ("confirmed", "unresolved", "excluded")
+    }
     return {
         "status": "ok",
         "reference_id": request.reference_id,
-        "total_objects": len(request.objects),
-        "confirmed_count": confirmed_count,
-        "unresolved_count": unresolved_count,
-        "excluded_count": excluded_count,
+        "assignment_id": current_rubric_id,
+        "definition_revision": definition_revision,
+        "total_objects": len(sanitized_objects),
+        "confirmed_count": counts["confirmed"],
+        "unresolved_count": counts["unresolved"],
+        "excluded_count": counts["excluded"],
+        "overlap_acknowledged": bool(overlaps and request.overlap_acknowledged),
+        "approval_invalidated": approval_invalidated,
+        "objects": sanitized_objects,
     }
 
 @app.post("/api/rubric/suggest")
@@ -348,6 +560,8 @@ async def rubric_suggest(reference: UploadFile = File(...)):
 def rubric_approve(request: RubricApprovalRequest):
     if request.rubric.assignment_type is None:
         raise HTTPException(422, "Instructor confirmation of the assignment type is required before rubric approval.")
+    if request.rubric.intended_unit not in {"mm", "cm", "m", "in", "ft"}:
+        raise HTTPException(422, "Confirm the intended assignment unit before rubric approval.")
     baseline_weights = {
         category.id: category.weight for category in default_rubric().categories
     }
@@ -364,12 +578,21 @@ def rubric_approve(request: RubricApprovalRequest):
             "rubric_source": "instructor_modified" if modified else "baseline_template",
             "rubric_template_name": BASELINE_RUBRIC_TEMPLATE,
             "rubric_modified_by_instructor": modified,
+            "intended_unit_confirmed": True,
         }
     )
     rubric_id = str(uuid.uuid4())
+    previous_rubric_id = REFERENCE_RUBRICS.get(request.reference_id)
+    if previous_rubric_id and previous_rubric_id != rubric_id:
+        previous_rubric = RUBRICS.get(previous_rubric_id)
+        if previous_rubric is not None:
+            RUBRICS[previous_rubric_id] = previous_rubric.model_copy(update={"approved": False})
     RUBRICS[rubric_id] = approved
     RUBRIC_REFERENCES[rubric_id] = request.reference_id
     REFERENCE_RUBRICS[request.reference_id] = rubric_id
+    object_record = REFERENCE_OBJECTS.get(request.reference_id)
+    if object_record is not None:
+        object_record["rubric_id"] = rubric_id
     return {
         "rubric_id": rubric_id,
         "reference_id": request.reference_id,
@@ -377,6 +600,7 @@ def rubric_approve(request: RubricApprovalRequest):
         "completion_scoring_mode": approved.completion_scoring_mode,
         "normalization_mode": approved.normalization_mode,
         "rubric": approved.model_dump(),
+        "object_definition_revision": (object_record or {}).get("definition_revision"),
         **rubric_contract(approved),
     }
 @app.post("/api/report",response_class=HTMLResponse)

@@ -46,10 +46,22 @@ class GradingPipelineOutput:
     unit_scale_review: UnitScaleReviewResult | None = None
     reference_objects_summary: dict[str, Any] | None = None
     student_object_correspondence: list[dict[str, Any]] | None = None
+    enforce_unit_decision: bool = False
 
     @property
     def rubric_selection(self) -> dict[str, str | None]:
         return {"rubric_id": self.rubric_id, "source": self.rubric_source}
+
+    @property
+    def grading_withheld(self) -> bool:
+        unit_decision_pending = bool(
+            self.unit_scale_review
+            and self.unit_scale_review.requires_instructor_acknowledgment
+            and not self.unit_scale_review.acknowledged
+        )
+        return self.compatibility.grading_withheld or (
+            self.enforce_unit_decision and unit_decision_pending
+        )
 
 @dataclass(frozen=True, slots=True)
 class ReviewArtifacts:
@@ -78,6 +90,8 @@ def run_grading_pipeline(
     rubric_references: Mapping[str, str],
     instructor_override: bool = False,
     confirmed_reference_objects: list[dict[str, Any]] | None = None,
+    custom_info_layers: set[str] | None = None,
+    enforce_unit_decision: bool = False,
 ) -> GradingPipelineOutput:
     """Run the shared deterministic selection, parsing, validation, and grading path."""
 
@@ -119,6 +133,7 @@ def run_grading_pipeline(
         source="reference",
         normalize=normalize,
         exclude_info_layers=True,
+        custom_info_layers=custom_info_layers,
     )
     student = parse_dxf_bytes(student_bytes, source="student", normalize=normalize, allow_empty=True)
     validation = validate_reference(reference)
@@ -164,18 +179,25 @@ def run_grading_pipeline(
         ]
         ref_obj_summary = {
             "total_objects": len(ref_objs),
+            "detected_count": sum(o.status == "detected" for o in ref_objs),
+            "proposed_count": sum(o.status == "proposed" for o in ref_objs),
             "confirmed_count": sum(o.status == "confirmed" for o in ref_objs),
             "unresolved_count": sum(o.status == "unresolved" for o in ref_objs),
             "excluded_count": sum(o.status == "excluded" for o in ref_objs),
             "assessment_state": (
                 "available"
                 if any(o.status == "confirmed" for o in ref_objs)
+                and not any(o.status in {"detected", "proposed", "unresolved"} for o in ref_objs)
                 else "incomplete_or_unavailable"
             ),
         }
 
     apply_acceptance_scoring(comparison, selected_rubric, compatibility)
-    if compatibility.grading_withheld:
+    unit_decision_pending = (
+        unit_scale_review.requires_instructor_acknowledgment
+        and not unit_scale_review.acknowledged
+    )
+    if compatibility.grading_withheld or (enforce_unit_decision and unit_decision_pending):
         comparison = _withheld_comparison(comparison, selected_rubric)
     return GradingPipelineOutput(
         reference_id=reference_id,
@@ -193,6 +215,7 @@ def run_grading_pipeline(
         unit_scale_review=unit_scale_review,
         reference_objects_summary=ref_obj_summary,
         student_object_correspondence=stu_obj_corr,
+        enforce_unit_decision=enforce_unit_decision,
     )
 
 def _withheld_comparison(
@@ -390,10 +413,11 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
     response = {
         "score": output.comparison["score"],
         "grading_status": (
-            "withheld" if output.compatibility.grading_withheld else "graded"
+            "withheld" if output.grading_withheld else "graded"
         ),
         "compatibility": compatibility,
         **compatibility,
+        "grading_withheld": output.grading_withheld,
         "scale_diagnostic": scale_diagnostic,
         **scale_diagnostic,
         "reference_id": output.reference_id,
@@ -458,12 +482,12 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
             "compatibility_status": output.compatibility.compatibility_status,
             "review_attempt": "current_request",
         }
-    if output.compatibility.grading_withheld:
+    if output.grading_withheld:
         response.update(
             {
                 "review_id": None,
                 "report_available": False,
-                "compatibility_message": compatibility_message(output),
+                "compatibility_message": review_withholding_message(output),
                 "available_actions": (
                     ["choose_another_file", "grade_anyway"]
                     if output.compatibility.compatibility_status != "empty_or_ungradable"
@@ -472,6 +496,22 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
             }
         )
     return ReviewArtifacts(reviewed_drawing=reviewed, response=response)
+
+
+def review_withholding_message(output: GradingPipelineOutput) -> str:
+    if output.compatibility.grading_withheld:
+        return compatibility_message(output)
+    unit_review = output.unit_scale_review
+    if (
+        unit_review
+        and unit_review.requires_instructor_acknowledgment
+        and not unit_review.acknowledged
+    ):
+        return (
+            (unit_review.prominent_notice or "Unit interpretation requires instructor review.")
+            + " Record an explicit instructor acknowledgment or correct and re-upload the file."
+        )
+    return compatibility_message(output)
 
 
 def compatibility_message(output: GradingPipelineOutput) -> str:

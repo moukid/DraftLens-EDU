@@ -288,7 +288,9 @@ def test_final_acceptance_presentation_controls_are_wired():
     stylesheet = client.get("/static/style.css").text
     assert parser.elements["assignment-title"][0] == "input"
     assert 'reviewButton.addEventListener("click", () => runReview(false))' in javascript
-    assert 'gradeAnywayButton.addEventListener("click", () => runReview(true))' in javascript
+    assert 'gradeAnywayButton.addEventListener("click", () => {' in javascript
+    assert 'Acknowledge the unit/scale decision before grading anyway.' in javascript
+    assert 'runReview(true);' in javascript
     assert "finding_presentation" in javascript
     assert "How to correct" in response.text
     assert "category-earned" in javascript and ".category-earned" in stylesheet

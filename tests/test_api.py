@@ -14,7 +14,7 @@ AUDIT_REFERENCE=A/"00_reference_000-Simple.dxf"
 AUDIT_MISSING=A/"02_missing_line_73B.dxf"
 def test_health(): assert client.get('/health').json()=={"status":"ok"}
 def test_grade_flow():
- with open(S/'reference.dxf','rb') as a,open(S/'student_missing_wall.dxf','rb') as b:r=client.post('/api/grade',data={'allow_fallback':'true'},files={'reference':('reference.dxf',a,'application/dxf'),'student':('student.dxf',b,'application/dxf')})
+ with open(S/'reference.dxf','rb') as a,open(S/'student_missing_wall.dxf','rb') as b:r=client.post('/api/grade',data={'allow_fallback':'true','grade_anyway':'true'},files={'reference':('reference.dxf',a,'application/dxf'),'student':('student.dxf',b,'application/dxf')})
  assert r.status_code==200 and r.json()['score']<100 and r.json()['reference']['entities']
 def test_rejects_non_dxf():
  r=client.post('/api/grade',files={'reference':('x.txt',b'x','text/plain'),'student':('x.dxf',b'x','application/dxf')}); assert r.status_code==400
@@ -181,7 +181,7 @@ def test_exact_manual_acceptance_reviews_have_no_student_or_supporting_findings(
  body=_post_review(
   reference_path=AUDIT_II/reference_name,
   student_path=AUDIT_II/student_name,
-  data={"allow_fallback":"true"},
+  data={"allow_fallback":"true","grade_anyway":"true"},
  ).json()
  assert body["score"]==100
  assert body["student_issue_count"]==0
@@ -194,7 +194,7 @@ def test_displaced_square_separates_primary_and_supporting_findings():
  body=_post_review(
   reference_path=AUDIT_II/"02-SQUARE-Reference.dxf",
   student_path=AUDIT_II/"02-SQUARE-Gap-3Unit.dxf",
-  data={"allow_fallback":"true"},
+  data={"allow_fallback":"true","grade_anyway":"true"},
  ).json()
  assert body["score"]==97
  assert body["finding_counts"]=={
@@ -215,7 +215,7 @@ def test_displaced_square_separates_primary_and_supporting_findings():
 
 def test_reference_validation_notes_are_counted_separately():
  unitless=_document_bytes(units=0)
- response=client.post("/api/review",data={"allow_fallback":"true"},files={
+ response=client.post("/api/review",data={"allow_fallback":"true","grade_anyway":"true"},files={
   "reference":("reference.dxf",unitless,"application/dxf"),
   "student":("student.dxf",unitless,"application/dxf"),
  })
@@ -273,7 +273,7 @@ def test_review_explicit_fallback_is_successful_but_not_implicit():
  rejected=_post_review()
  assert rejected.status_code==409
  assert "No approved rubric" in rejected.json()["detail"]
- accepted=_post_review(data={"allow_fallback":"true"})
+ accepted=_post_review(data={"allow_fallback":"true","grade_anyway":"true"})
  assert accepted.status_code==200
  assert accepted.json()["rubric_selection"]=={"rubric_id":None,"source":"explicit_fallback"}
 
@@ -292,12 +292,12 @@ def test_review_rejects_unapproved_and_mismatched_rubrics():
  assert "not associated" in mismatched.json()["detail"]
 
 def test_review_rejects_malformed_reference_and_student_without_internal_details():
- malformed_reference=client.post("/api/review",data={"allow_fallback":"true"},files={
+ malformed_reference=client.post("/api/review",data={"allow_fallback":"true","grade_anyway":"true"},files={
   "reference":("reference.dxf",b"not a dxf","application/dxf"),
   "student":("student.dxf",(S/"student_good.dxf").read_bytes(),"application/dxf"),
  })
  assert malformed_reference.status_code==422
- malformed_student=client.post("/api/review",data={"allow_fallback":"true"},files={
+ malformed_student=client.post("/api/review",data={"allow_fallback":"true","grade_anyway":"true"},files={
   "reference":("reference.dxf",(S/"reference.dxf").read_bytes(),"application/dxf"),
   "student":("student.dxf",b"not a dxf","application/dxf"),
  })
@@ -358,7 +358,7 @@ def test_review_inaccurate_geometry_contains_expected_and_actual_overlays():
 def test_review_reports_unsupported_student_entities():
  reference=_document_bytes()
  student=_document_bytes(unsupported=True)
- response=client.post("/api/review",data={"allow_fallback":"true"},files={
+ response=client.post("/api/review",data={"allow_fallback":"true","grade_anyway":"true"},files={
   "reference":("reference.dxf",reference,"application/dxf"),
   "student":("student.dxf",student,"application/dxf"),
  })
@@ -372,7 +372,7 @@ def test_review_reports_unsupported_student_entities():
 def test_review_api_preserves_safe_svg_escaping():
  malicious='<script>&"'
  document=_document_bytes(text=malicious)
- response=client.post("/api/review",data={"allow_fallback":"true"},files={
+ response=client.post("/api/review",data={"allow_fallback":"true","grade_anyway":"true"},files={
   "reference":("reference.dxf",document,"application/dxf"),
   "student":("student.dxf",document,"application/dxf"),
  })

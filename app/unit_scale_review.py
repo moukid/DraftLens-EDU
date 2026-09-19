@@ -177,9 +177,15 @@ def evaluate_unit_scale_review(
             "Confirm the intended assignment unit during reference setup."
         )
 
+    intended_unit_unresolved = (
+        not intended_unit_confirmed
+        or intended_unit in {"unspecified", "unitless"}
+    )
     requires_ack = bool(
-        (units_differ or geom_mismatch)
-        and not physically_consistent
+        (
+            intended_unit_unresolved
+            or ((units_differ or geom_mismatch) and not physically_consistent)
+        )
         and not instructor_acknowledged
     )
 

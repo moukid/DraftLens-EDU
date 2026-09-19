@@ -534,6 +534,11 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
     unit_review = response.get("unit_scale_review") or {}
     if unit_review.get("prominent_notice"):
         unit_msg = unit_review["prominent_notice"]
+        if unit_review.get("acknowledged"):
+            unit_msg += (
+                " Instructor decision recorded: this unit/scale notice was acknowledged "
+                "for the review; no source geometry was rescaled or modified."
+            )
         unit_cell = Table([[_p(unit_msg, styles["callout"])]], colWidths=[width])
         unit_cell.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#ebf8ff")),

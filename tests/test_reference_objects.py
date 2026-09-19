@@ -15,7 +15,7 @@ from app.reference_objects import (
 )
 from app.review_service import run_grading_pipeline
 from fastapi.testclient import TestClient
-from app.main import app, REFERENCE_OBJECTS
+from app.main import app, REFERENCE_OBJECTS, REFERENCE_RUBRICS, RUBRICS
 
 
 def _dxf_bytes(doc: ezdxf.document.Drawing) -> bytes:
@@ -310,6 +310,7 @@ def test_api_reference_objects_inspect_and_confirm():
         "/api/reference/objects/confirm",
         json={
             "reference_id": ref_id,
+            "inspection_token": data["inspection_token"],
             "objects": [
                 {
                     "occurrence_id": "D1-001",
@@ -328,5 +329,284 @@ def test_api_reference_objects_inspect_and_confirm():
 
     # Check store
     assert ref_id in REFERENCE_OBJECTS
-    assert len(REFERENCE_OBJECTS[ref_id]) == 1
-    assert REFERENCE_OBJECTS[ref_id][0]["status"] == "confirmed"
+    assert len(REFERENCE_OBJECTS[ref_id]["objects"]) == 1
+    assert REFERENCE_OBJECTS[ref_id]["objects"][0]["status"] == "confirmed"
+
+
+def test_descriptive_and_malformed_info_text_is_not_promoted_to_marker():
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (10, 0), dxfattribs={"layer": "WALLS"})
+    msp.add_text("D1", dxfattribs={"layer": "DL-Info", "insert": (5, 0)})
+    msp.add_text("Door type one", dxfattribs={"layer": "DL-Info", "insert": (20, 0)})
+    msp.add_text("D-1", dxfattribs={"layer": "DL-Info", "insert": (30, 0)})
+    msp.add_text("X9", dxfattribs={"layer": "DL-Info", "insert": (40, 0)})
+    drawing = parse_dxf_bytes(_dxf_bytes(doc), exclude_info_layers=False)
+
+    plan, legend, metadata = extract_reference_markers_and_legend(
+        drawing.entities,
+        drawing.unsupported_entities,
+    )
+
+    assert [marker.code for marker in plan] == ["D1", "X9"]
+    assert legend == []
+    assert {entry["text"] for entry in metadata["ignored_information_text"]} == {
+        "Door type one",
+        "D-1",
+    }
+    objects, summary = build_proposed_reference_objects(plan, drawing.entities)
+    assert objects[1].status == "unresolved"
+    assert summary["unknown_codes"] == ["X9"]
+
+
+def test_student_geometry_on_reserved_layer_is_not_hidden_from_grading():
+    doc = ezdxf.new("R2010")
+    doc.modelspace().add_line((0, 0), (10, 0), dxfattribs={"layer": "DL-Info"})
+    drawing = parse_dxf_bytes(
+        _dxf_bytes(doc),
+        source="student",
+        exclude_info_layers=True,
+    )
+    assert len(drawing.entities) == 1
+    assert drawing.entities[0].layer == "DL-Info"
+    assert drawing.info_entities == []
+
+
+def test_confirmation_rejects_stale_foreign_and_empty_groups():
+    client = TestClient(app)
+    doc = ezdxf.new("R2010")
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (10, 0), dxfattribs={"layer": "WALLS"})
+    msp.add_text("D1", dxfattribs={"layer": "DL-Info", "insert": (5, 0)})
+    ref_bytes = _dxf_bytes(doc)
+    inspected = client.post(
+        "/api/reference/objects/inspect",
+        files={"reference": ("reference.dxf", ref_bytes, "application/dxf")},
+    ).json()
+    obj = inspected["objects"][0]
+
+    stale = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": "0" * 64,
+            "objects": [{**obj, "status": "confirmed"}],
+        },
+    )
+    assert stale.status_code == 409
+
+    foreign = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": inspected["inspection_token"],
+            "objects": [{
+                **obj,
+                "member_entity_ids": ["R-99999"],
+                "status": "confirmed",
+            }],
+        },
+    )
+    assert foreign.status_code == 422
+    assert "outside this reference" in foreign.json()["detail"]
+
+    empty = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": inspected["inspection_token"],
+            "objects": [{
+                **obj,
+                "member_entity_ids": [],
+                "status": "confirmed",
+            }],
+        },
+    )
+    assert empty.status_code == 422
+    assert "without reference geometry" in empty.json()["detail"]
+
+
+def test_overlapping_confirmed_memberships_require_explicit_acknowledgment():
+    client = TestClient(app)
+    doc = ezdxf.new("R2010")
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (10, 0), dxfattribs={"layer": "WALLS"})
+    msp.add_text("D1", dxfattribs={"layer": "DL-Info", "insert": (4, 0)})
+    msp.add_text("W1", dxfattribs={"layer": "DL-Info", "insert": (6, 0)})
+    inspected = client.post(
+        "/api/reference/objects/inspect",
+        files={"reference": ("reference.dxf", _dxf_bytes(doc), "application/dxf")},
+    ).json()
+    objects = [{**obj, "status": "confirmed"} for obj in inspected["objects"]]
+
+    rejected = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": inspected["inspection_token"],
+            "objects": objects,
+        },
+    )
+    assert rejected.status_code == 409
+
+    accepted = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": inspected["inspection_token"],
+            "overlap_acknowledged": True,
+            "objects": objects,
+        },
+    )
+    assert accepted.status_code == 200
+    body = accepted.json()
+    assert body["overlap_acknowledged"] is True
+    assert all(obj["shared_entity_ids"] for obj in body["objects"])
+
+
+def test_object_change_invalidates_assignment_approval_and_reopens_saved_members():
+    client = TestClient(app)
+    doc = ezdxf.new("R2010")
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (10, 0), dxfattribs={"layer": "WALLS"})
+    msp.add_line((0, 5), (10, 5), dxfattribs={"layer": "WALLS"})
+    msp.add_text("D1", dxfattribs={"layer": "DL-Info", "insert": (5, 2.5)})
+    ref_bytes = _dxf_bytes(doc)
+    inspected = client.post(
+        "/api/reference/objects/inspect",
+        files={"reference": ("reference.dxf", ref_bytes, "application/dxf")},
+    ).json()
+    obj = {**inspected["objects"][0], "status": "confirmed"}
+    first_confirmation = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": inspected["inspection_token"],
+            "objects": [obj],
+        },
+    )
+    assert first_confirmation.status_code == 200
+
+    suggestion = client.post(
+        "/api/rubric/suggest",
+        files={"reference": ("reference.dxf", ref_bytes, "application/dxf")},
+    ).json()
+    suggestion["rubric"]["assignment_type"] = suggestion["suggested_assignment_type"]
+    approval = client.post(
+        "/api/rubric/approve",
+        json={"reference_id": suggestion["reference_id"], "rubric": suggestion["rubric"]},
+    )
+    assert approval.status_code == 200
+    rubric_id = approval.json()["rubric_id"]
+    assert REFERENCE_OBJECTS[inspected["reference_id"]]["rubric_id"] == rubric_id
+
+    changed = {**obj, "member_entity_ids": obj["member_entity_ids"][:1]}
+    reconfirmed = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": inspected["inspection_token"],
+            "rubric_id": rubric_id,
+            "objects": [changed],
+        },
+    )
+    assert reconfirmed.status_code == 200
+    assert reconfirmed.json()["approval_invalidated"] is True
+    assert inspected["reference_id"] not in REFERENCE_RUBRICS
+    assert RUBRICS[rubric_id].approved is False
+
+    stale_assignment = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": inspected["reference_id"],
+            "inspection_token": inspected["inspection_token"],
+            "rubric_id": rubric_id,
+            "objects": [changed],
+        },
+    )
+    assert stale_assignment.status_code == 409
+
+    reopened = client.post(
+        "/api/reference/objects/inspect",
+        files={"reference": ("reference.dxf", ref_bytes, "application/dxf")},
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["objects"][0]["member_entity_ids"] == changed["member_entity_ids"]
+    assert reopened.json()["objects"][0]["status"] == "confirmed"
+
+def test_synthetic_t3_marker_counts_exclude_six_legacy_legend_samples():
+    client = TestClient(app)
+    doc = ezdxf.new("R2010")
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (2000, 0), dxfattribs={"layer": "WALLS"})
+    expected = {"D1": 7, "W1": 9, "C1": 7, "DD1": 1, "SD1": 1, "S1": 2}
+    index = 0
+    for code, count in expected.items():
+        for _ in range(count):
+            msp.add_text(
+                code,
+                dxfattribs={
+                    "layer": "DL-Info",
+                    "insert": (50 + (index % 10) * 100, 500 - (index // 10) * 100),
+                },
+            )
+            index += 1
+    for legend_index, code in enumerate(expected):
+        msp.add_text(
+            code,
+            dxfattribs={"layer": "DL-Info", "insert": (1500, 50 + legend_index * 20)},
+        )
+    msp.add_text(
+        "LEGEND DESCRIPTIONS",
+        dxfattribs={"layer": "DL-Info", "insert": (1600, 50)},
+    )
+
+    response = client.post(
+        "/api/reference/objects/inspect",
+        data={"legend_bbox": "1450, 0, 1700, 200"},
+        files={"reference": ("t3-synthetic.dxf", _dxf_bytes(doc), "application/dxf")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["counts_by_type"] == expected
+    assert body["metadata"]["plan_markers_count"] == 27
+    assert body["metadata"]["legend_samples_count"] == 6
+    assert len(body["metadata"]["ignored_information_text"]) == 1
+
+
+def test_custom_information_layer_and_mapping_are_applied_and_confirmable():
+    client = TestClient(app)
+    doc = ezdxf.new("R2010")
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+    msp.add_line((0, 0), (20, 0), dxfattribs={"layer": "WALLS"})
+    msp.add_text("X9", dxfattribs={"layer": "COURSE-TAGS", "insert": (10, 0)})
+    response = client.post(
+        "/api/reference/objects/inspect",
+        data={
+            "custom_info_layers": "COURSE-TAGS",
+            "code_mappings": '{"X9":"Instructor-defined object"}',
+        },
+        files={"reference": ("custom.dxf", _dxf_bytes(doc), "application/dxf")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["objects"][0]["meaning"] == "Instructor-defined object"
+    assert body["objects"][0]["status"] == "proposed"
+    assert len(body["available_entities"]) == 1
+    confirmation = client.post(
+        "/api/reference/objects/confirm",
+        json={
+            "reference_id": body["reference_id"],
+            "inspection_token": body["inspection_token"],
+            "objects": [{**body["objects"][0], "status": "confirmed"}],
+        },
+    )
+    assert confirmation.status_code == 200
+    assert confirmation.json()["confirmed_count"] == 1

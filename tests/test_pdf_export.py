@@ -34,6 +34,8 @@ def _approve(reference, *, filename="reference.dxf", normalization_mode="strict"
     assert suggestion_response.status_code == 200
     suggestion = suggestion_response.json()
     suggestion["rubric"]["assignment_type"] = suggestion["suggested_assignment_type"]
+    if suggestion["rubric"]["intended_unit"] == "unspecified":
+        suggestion["rubric"]["intended_unit"] = "mm"
     suggestion["rubric"]["normalization_mode"] = normalization_mode
     approval = client.post(
         "/api/rubric/approve",
