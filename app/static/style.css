@@ -359,6 +359,10 @@ dd { margin: 2px 0 0; font-weight: 800; overflow-wrap: anywhere; }
   font-size: 12px;
 }
 .rubric-row input { text-align: right; }
+.rubric-row strong {
+  font-weight: 800;
+  color: var(--charcoal);
+}
 fieldset { margin: 13px 0; padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
 fieldset legend { padding: 0 4px; }
 .tolerance-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
@@ -874,13 +878,22 @@ fieldset legend { padding: 0 4px; }
 
 .is-loading .primary-button:not(:disabled) { opacity: .72; }
 footer {
-  min-height: 36px;
-  padding: 9px 24px;
+  min-height: 48px;
+  padding: 10px 24px;
   border-top: 1px solid var(--line);
   background: var(--surface);
   color: var(--muted);
   text-align: center;
   font-size: 11px;
+}
+footer p {
+  margin: 0;
+  line-height: 1.45;
+}
+footer .footer-credit {
+  margin-top: 3px;
+  font-weight: 500;
+  color: var(--charcoal);
 }
 
 .compatibility-card {

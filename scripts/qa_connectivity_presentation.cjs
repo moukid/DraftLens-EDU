@@ -193,6 +193,36 @@ async function check(name, fn) {
       assert.equal(await page.locator('#drawing-viewport svg').getAttribute('viewBox'), viewBoxAfterZoom);
     });
 
+    await check('7. Small UI fixes: Bold rubric category headings, Angle alignment, and two-line footer credit', async () => {
+      // 1. Two-line footer credit
+      const footerPs = await page.locator('footer p').allTextContents();
+      assert.equal(footerPs.length, 2, 'Footer has 2 lines');
+      assert.equal(footerPs[0].trim(), 'DraftLens EDU · Approved rubrics · Deterministic geometry · Traceable evidence');
+      assert.equal(footerPs[1].trim(), 'Copyright reserved @MOUKiD BADiE - Mervat El-Sawaf');
+
+      // 2. Angle alignment in tolerance-grid
+      const angleLabel = page.locator('.tolerance-grid label:has([data-tolerance="angle"])');
+      const angleSmall = angleLabel.locator('small');
+      assert.equal(await angleSmall.count(), 1, 'Angle label contains small description');
+      assert.match(await angleSmall.textContent(), /Degrees/);
+      assert.equal(await page.locator('.tolerance-grid > small').count(), 0, 'No loose tolerance notes disrupting grid rows');
+
+      // 3. Rubric category headings bold
+      await page.evaluate(() => {
+        state.provisionalRubric = {
+          assignment_title: 'Test Assignment',
+          assignment_type: 'Other',
+          normalization_mode: 'translation',
+          completion_scoring_mode: 'rule_based',
+          categories: [{name: 'Geometry Accuracy', id: 'geometry_accuracy', weight: 40}],
+          tolerances: {position: 0.5, length: 0.5, angle: 1.0}
+        };
+        renderRubricEditor();
+      });
+      const strongText = await page.locator('.rubric-row strong').textContent();
+      assert.equal(strongText.trim(), 'Geometry Accuracy');
+    });
+
     console.log('\n--- Connectivity QA Summary ---');
     console.log(`Passed: ${passes.length}`);
     console.log(`Failed: ${failures.length}`);

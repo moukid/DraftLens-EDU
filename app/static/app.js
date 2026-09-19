@@ -796,7 +796,9 @@ function renderRubricEditor() {
     const row = document.createElement("label");
     row.className = "rubric-row";
     const name = document.createElement("span");
-    name.textContent = category.name + " - " + (CATEGORY_DEFINITIONS[category.id] || "");
+    const categoryTitle = document.createElement("strong");
+    categoryTitle.textContent = category.name;
+    name.append(categoryTitle, " - " + (CATEGORY_DEFINITIONS[category.id] || ""));
     const input = document.createElement("input");
     input.type = "number";
     input.min = "0";

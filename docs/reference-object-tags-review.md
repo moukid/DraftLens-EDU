@@ -2,15 +2,17 @@
 
 ## Verdict
 
-**READY FOR CODEX REVIEW.** The repaired implementation passes all verification criteria:
-- Complete automated test suite: **466 passed, 7 dependency deprecation warnings in 26.13 s**.
+**READY FOR CODEX AUDIT.** (Initial pre-audit completed; actual private T3 CAD acceptance pending external tester execution).
+The implementation passes all verification criteria:
+- Complete automated test suite: **466 passed, 7 dependency deprecation warnings in 28.85 s**.
 - Live headless browser QA (Playwright / Edge):
   - `scripts/qa_reference_object_tags.cjs`: **6/6 passed** (defaults, assignment-type enforcement, reference object proposals, student underlay visibility across error filters, PDF downloads).
   - `scripts/qa_interactive_legend.cjs`: **12/12 passed** (all 9 legend controls, two-way sync, pointer hit testing, zoom/pan preservation, header credit & contrast).
   - `scripts/qa_review_usability.cjs`: **11/11 passed** (zoom/pan, selection preservation, download error recovery, repeated reviews).
-  - `scripts/qa_connectivity_presentation.cjs`: **6/6 passed** (Gaps & Connections terminology and approved contract text, localized endpoint markers and connector line, hidden bounding box by default, toggle technical details, supporting finding selection with plain-language feedback and no extra deduction, pan/zoom preservation).
+  - `scripts/qa_connectivity_presentation.cjs`: **7/7 passed** (Gaps & Connections terminology and contract text, localized endpoint markers and connector line, hidden bounding box by default, toggle technical details, supporting finding selection with plain-language feedback and no extra deduction, pan/zoom preservation, bold rubric category headings, Angle alignment, two-line footer credit).
 - JavaScript syntax: `node --check app/static/app.js` — PASS.
-- CAD policy check: **PASS; 0 tracked DXF/DWG files; 57 historical commits inspected**.
+- Python compilation: `python -B -m compileall -q app tests` — PASS.
+- CAD policy check: **PASS; 0 tracked DXF/DWG files; 58 historical commits inspected**.
 - Checkpoint commit preserved: `98dc3fc` (`checkpoint(codex): preserve repaired reference object tags implementation awaiting browser acceptance`).
 - Separate worktree isolation: `fix/issue-5-partial-ellipse-rendering` in the primary repo root checkout remains untouched.
 
@@ -87,8 +89,33 @@
   - Selecting Gaps & Connections retains the complete student drawing as a readable, neutral underlay (`opacity: 0.40; pointer-events: none`).
   - Active zoom and pan coordinates are preserved when switching visual roles or selecting findings. Locate centers graphics only on deliberate user click.
 
+### 9. Small UI Alignment & Credit Repairs
+- **Rubric Category Headings**: In `app/static/app.js` and `app/static/style.css`, category names inside `.rubric-row` are wrapped in `<strong>` and styled bold (`font-weight: 800; color: var(--charcoal);`).
+- **Angle Tolerance Alignment**: In `app/templates/index.html`, Angle `<label>` incorporates its `<small>` description internally (`Degrees; line/path direction and arc span.`), eliminating the rogue full-width `.tolerance-note` item and aligning Position, Length, and Angle across the primary 3-column row.
+- **Two-Line Footer Credit**: In `app/templates/index.html` and `app/static/style.css`, the footer now displays two distinct lines:
+  - Line 1: `DraftLens EDU · Approved rubrics · Deterministic geometry · Traceable evidence`
+  - Line 2: `Copyright reserved @MOUKiD BADiE - Mervat El-Sawaf`
 
 ---
+
+## Agreed Functionality Acceptance Checklist
+
+| Area | Required Behavior | Status | Supporting Evidence |
+| :--- | :--- | :---: | :--- |
+| **Reference information layers** | Reserve reference layers whose names start with `DL-Info` (case-insensitive, including suffixes). Do not match names merely containing this text elsewhere. Parse applicable metadata while excluding it from assessed geometry, normalization, scale estimation, and drawing extents. | **PASS** | `app/reference_objects.py:is_info_layer()`, `app/dxf.py:parse_dxf_bytes()`, tested in `tests/test_reference_objects.py::test_is_info_layer` & `test_grading_invariance_with_info_layers`. Non-prefix names like `FLOOR-DL-Info` and `DL-EXTRA-INFO` are rejected. |
+| **Legend samples** | Distinguish legend examples from actual object markers. Unknown or ambiguous markers remain visibly unresolved. | **PASS** | Markers on `DL-INFO-LEGEND` or inside detected legend table region are categorized as legend samples with exclusion reasons; unmapped codes display `unresolved` / `Unmapped (...)`. Tested in `tests/test_reference_objects.py::test_extract_reference_markers_and_legend_separation`. |
+| **Student layer handling** | A student must not bypass assessment simply by placing real drawing geometry on a reserved information layer. | **PASS** | `app/dxf.py` line 113 specifies `if exclude_info_layers and source == "reference"`. Student DXF geometry (`source == "student"`) is never excluded and is always assessed regardless of layer name. |
+| **Object confirmation** | Add/remove members, confirm, exclude, and reopen work correctly. Reject stale, foreign, and cross-assignment references server-side. Require overlap acknowledgment where applicable. | **PASS** | Server-side validation rejects stale tokens (409), foreign entities (422), and overlapping memberships without explicit `overlap_acknowledged: true`. Tested in `tests/test_reference_objects.py::test_overlapping_confirmed_memberships_require_explicit_acknowledgment`. |
+| **Object counts** | Present confirmed reference expectations accurately. Do not imply automatic student door/window recognition or object scoring exists where it does not. | **PASS** | Read-only correspondence card explicitly clarifies: "Does not alter geometry scores". Student geometry correspondence evaluates members matched per confirmed reference occurrence without inventing object scores. Tested in `tests/test_reference_objects.py`. |
+| **Error overlays** | Missing, Extra, Inaccurate, Gaps & Connections, Warning, and Critical retain the complete neutral student drawing underneath their diagnostic overlays. | **PASS** | `.drawing-viewport.student-underlay-active svg > g[data-layer="student"]` applies `opacity: 0.40; pointer-events: none`. Verified in `scripts/qa_reference_object_tags.cjs` (Step 5) and `scripts/qa_connectivity_presentation.cjs` (Steps 2 & 3). |
+| **Missing geometry** | Display expected reference geometry in the same comparison coordinate frame as the student drawing. | **PASS** | `app/reviewed_dxf.py` transforms ghosted missing geometry and locations using `(-selected_translation[0], -selected_translation[1])`. Tested in `tests/test_reviewed_dxf.py::test_missing_geometry_overlay_aligned_with_student_translation`. |
+| **Base views** | All shows the intended combined review; Reference and Student show their corresponding base drawings. Empty diagnostic categories still retain the student underlay. | **PASS** | `app/static/app.js:applyDrawingRoleVisibility()` handles `all`, `reference`, `student`, and error roles. Tested in `scripts/qa_interactive_legend.cjs`. |
+| **Findings selection** | Clicking an issue activates the appropriate legend category and highlights its evidence. Preserve zoom/pan; Locate deliberately navigates to the selected evidence. | **PASS** | Selection preserves current `viewBox` in SVG. Verified in `scripts/qa_interactive_legend.cjs` and `scripts/qa_connectivity_presentation.cjs` (Step 6). |
+| **Assignment type** | Instructor explicitly selects and confirms the reference type. A geometry-based suggestion must not silently approve "Mixed Geometric Composition". Persist the choice correctly and invalidate approval when required. | **PASS** | Dropdown defaults to unselected placeholder; `#approve-rubric` disabled until selection is made; `/api/rubric/approve` validates `assignment_type` is non-empty (422). Tested in `tests/test_api.py::test_rubric_approval_rejects_empty_assignment_type`. |
+| **Placement policy** | New assignments default to Translation-tolerant placement in both UI and backend. Preserve explicitly selected strict policies and existing approved snapshots. Do not introduce rotation or scaling. | **PASS** | Defaults to `"translation"` in `app/templates/index.html` and `app/main.py`. Strict mode remains fully selectable. Tested in `tests/test_normalization_transparency.py`. |
+| **Units** | Distinguish declared-unit mismatch from demonstrated geometric scale mismatch. Do not silently rescale or treat insertion-unit metadata as proof of actual drawing scale. Enforce the established instructor decision and grade-withholding behavior server-side. | **PASS** | `app/unit_scale_review.py` evaluates 6 diagnostic states. `/api/review` returns `grading_status: "withheld"` and `score: null` until acknowledged via `grade_anyway: true`. Tested in `tests/test_unit_scale_review.py`. |
+| **Small UI fixes** | Rubric category headings are bold; Angle input aligns with Position and Length; footer credit appears on its own second line. | **PASS** | Category headings bolded via `<strong>`; Angle input in `.tolerance-grid` aligns in 3-column row with Position and Length; footer credit on 2nd line. Verified in `scripts/qa_connectivity_presentation.cjs` (Step 7). |
+
 
 ## Status Table: GitHub Issues #1 through #11
 
@@ -111,13 +138,15 @@
 ## Verification Evidence
 
 ### Automated Test Suite
-- `pytest -q -p no:cacheprovider`: **457 passed, 7 deprecation warnings in 23.47 s**.
+- `pytest -q -p no:cacheprovider`: **466 passed, 7 deprecation warnings in 28.85 s**.
 - Regressions added/verified:
+  - `tests/test_connectivity_presentation.py` (6 tests: localized markers, hidden technical box, tolerance connections, intentional openings, zero deduction, approved contract text).
   - Case-insensitive `DL-Info` layer matching (`tests/test_reference_objects.py`).
   - Missing-geometry overlay translation alignment (`tests/test_reviewed_dxf.py`).
   - Error-category student underlay visibility (`tests/test_interactive_legend.py`).
   - Explicit assignment-type requirement on rubric approval (`tests/test_api.py`).
   - Default translation placement and selectable strict placement (`tests/test_normalization_transparency.py`).
+  - Unit scale review 6 diagnostic states and grade-withholding (`tests/test_unit_scale_review.py`).
 
 ### Live Headless Browser QA (Playwright / Microsoft Edge)
 - `scripts/qa_reference_object_tags.cjs`: **6/6 check groups passed**:
@@ -129,11 +158,18 @@
   6. PDF report export and binary signature verification.
 - `scripts/qa_interactive_legend.cjs`: **12/12 check groups passed**.
 - `scripts/qa_review_usability.cjs`: **11/11 check groups passed**.
+- `scripts/qa_connectivity_presentation.cjs`: **7/7 check groups passed** (Gaps & Connections terminology, student underlay at 0.40 opacity, localized markers, hidden technical bounding box, collapsed/expanded supporting details, pan/zoom preservation, small UI fixes).
 
 ### Static Analysis & CAD Policy
 - `node --check app/static/app.js`: PASS.
 - `python -B -m compileall -q app tests`: PASS.
-- `python -B scripts/check_cad_policy.py --history`: **PASS; no tracked DXF/DWG files; 56 historical commits inspected**.
+- `git diff --check`: PASS (0 whitespace errors).
+- `python -B scripts/check_cad_policy.py --history`: **PASS; no tracked DXF/DWG files; 58 historical commits inspected**.
+
+### Private CAD Data Policy & Acceptance Status
+- In strict adherence to the permanent CAD policy, no DXF or DWG files exist in the repository or git history.
+- Synthetic fixtures in `tests/test_reference_objects.py` thoroughly exercise the separation of plan markers from legend samples (e.g. 3 plan markers correctly separated from 2 legend samples).
+- Final manual acceptance against proprietary external T3 reference, student, and information-layer files remains pending external instructor execution outside this checkout.
 
 ---
 

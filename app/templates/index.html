@@ -156,8 +156,7 @@
             <div class="tolerance-grid">
               <label title="Maximum allowed point or center displacement.">Position (drawing units)<input data-tolerance="position" type="number" min="0" step="0.1"><small>Endpoints, centers, and topology positions.</small></label>
               <label title="Maximum allowed difference in measured length.">Length (drawing units)<input data-tolerance="length" type="number" min="0" step="0.1"><small>Lines, paths, arcs, circles, ellipses, and splines.</small></label>
-              <label>Angle °<input data-tolerance="angle" type="number" min="0" step="0.1"></label>
-              <small class="tolerance-note">Degrees; line/path direction and arc span.</small>
+              <label title="Maximum allowed angle difference.">Angle °<input data-tolerance="angle" type="number" min="0" step="0.1"><small>Degrees; line/path direction and arc span.</small></label>
               <label title="Maximum allowed radius difference.">Radius (drawing units)<input data-tolerance="radius" type="number" min="0" step="0.1"><small>Circle and arc radius.</small></label>
               <label title="Maximum allowed dimension measurement difference.">Dimension (drawing units)<input data-tolerance="dimension" type="number" min="0" step="0.1"><small>Supported DXF dimension measurements.</small></label>
               <label hidden>Vertex tolerance unavailable<input data-tolerance="vertex" type="number" min="0" step="0.1" disabled></label>
@@ -445,7 +444,10 @@
     </section>
   </main>
 
-  <footer>DraftLens EDU · Approved rubrics · Deterministic geometry · Traceable evidence</footer>
+  <footer>
+    <p>DraftLens EDU · Approved rubrics · Deterministic geometry · Traceable evidence</p>
+    <p class="footer-credit">Copyright reserved @MOUKiD BADiE - Mervat El-Sawaf</p>
+  </footer>
   <script src="/static/app.js?v=interactive-legend-1"></script>
 </body>
 </html>
