@@ -590,6 +590,27 @@ fieldset legend { padding: 0 4px; }
   filter: drop-shadow(0 0 3px rgba(15, 28, 34, .75));
   stroke-width: 5px !important;
 }
+.drawing-viewport g[data-issue-id].is-selected > circle.connectivity-endpoint {
+  stroke-width: 3px !important;
+  stroke: #97266d !important;
+  fill: #fff !important;
+  filter: drop-shadow(0 0 3px rgba(213, 63, 140, .85));
+}
+.drawing-viewport g[data-issue-id].is-selected > line.connectivity-connector {
+  stroke-width: 2.5px !important;
+  stroke: #97266d !important;
+  filter: drop-shadow(0 0 3px rgba(213, 63, 140, .85));
+}
+.drawing-viewport g[data-issue-id].is-selected > circle.connectivity-junction {
+  stroke-width: 3px !important;
+  stroke: #97266d !important;
+  filter: drop-shadow(0 0 3px rgba(213, 63, 140, .85));
+}
+
+/* Technical details mode for bounding regions */
+.drawing-viewport.show-technical-details svg .technical-only {
+  display: inline !important;
+}
 
 /* Subdued readable student underlay during error category views */
 .drawing-viewport.student-underlay-active svg > g[data-layer="student"],
@@ -607,6 +628,15 @@ fieldset legend { padding: 0 4px; }
 .drawing-viewport svg .is-role-hidden {
   display: none !important;
   pointer-events: none !important;
+}
+.role-explanation {
+  padding: 8px 14px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  background: #fdf6fa;
+  color: #702459;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 .assessment-notices {
   padding: 8px 16px;

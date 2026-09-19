@@ -7,7 +7,7 @@ from typing import Any
 from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue
 
 
-SVG_STYLE = """svg{background:#fff}g{vector-effect:non-scaling-stroke}.reference{fill:none;stroke:#2f855a;stroke-width:1;opacity:.42}.student{fill:none;stroke:#24313a;stroke-width:1.35}.missing{fill:none;stroke:#ed8936;stroke-width:3;stroke-dasharray:9 6}.extra{fill:none;stroke:#3182ce;stroke-width:3}.inaccurate-expected{fill:none;stroke:#ed8936;stroke-width:2;stroke-dasharray:7 5}.inaccurate-actual{fill:none;stroke:#e53e3e;stroke-width:3}.connectivity{fill:none;stroke:#d53f8c;stroke-width:3}.warning{fill:#ecc94b;fill-opacity:.12;stroke:#b7791f;stroke-width:2;stroke-dasharray:4 4}.critical{fill:#e53e3e;fill-opacity:.12;stroke:#c53030;stroke-width:3}.entity-text{font:12px sans-serif;fill:currentColor;stroke:none}.empty{font:14px sans-serif;fill:#718096;stroke:none}"""
+SVG_STYLE = """svg{background:#fff}g{vector-effect:non-scaling-stroke}.reference{fill:none;stroke:#2f855a;stroke-width:1;opacity:.42}.student{fill:none;stroke:#24313a;stroke-width:1.35}.missing{fill:none;stroke:#ed8936;stroke-width:3;stroke-dasharray:9 6}.extra{fill:none;stroke:#3182ce;stroke-width:3}.inaccurate-expected{fill:none;stroke:#ed8936;stroke-width:2;stroke-dasharray:7 5}.inaccurate-actual{fill:none;stroke:#e53e3e;stroke-width:3}.connectivity{fill:none;stroke:#d53f8c;stroke-width:3}.connectivity-endpoint{fill:#fff;stroke:#d53f8c;stroke-width:2}.connectivity-connector{stroke:#d53f8c;stroke-width:1.5;stroke-dasharray:3 2}.connectivity-junction{fill:#d53f8c;fill-opacity:.25;stroke:#d53f8c;stroke-width:2}.connectivity-entity{fill:none;stroke:#d53f8c;stroke-width:2.5}.connectivity-region{fill:none;stroke:#d53f8c;stroke-width:1;stroke-dasharray:3 3}.technical-only{display:none}.warning{fill:#ecc94b;fill-opacity:.12;stroke:#b7791f;stroke-width:2;stroke-dasharray:4 4}.critical{fill:#e53e3e;fill-opacity:.12;stroke:#c53030;stroke-width:3}.entity-text{font:12px sans-serif;fill:currentColor;stroke:none}.empty{font:14px sans-serif;fill:#718096;stroke:none}"""
 
 
 def _number(value: float) -> str:
@@ -108,7 +108,7 @@ def _entity_svg(entity: ReviewedEntity, css_class: str, transform: CoordinateTra
     return ""
 
 
-def _region_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> str:
+def _region_svg(issue: ReviewedIssue, transform: CoordinateTransform, extra_class: str = "") -> str:
     if not issue.region:
         return ""
     min_x, min_y, max_x, max_y = issue.region
@@ -118,7 +118,8 @@ def _region_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> str:
     height = max(abs(bottom_right[1] - top_left[1]), 8.0)
     x = top_left[0] - (width - abs(bottom_right[0] - top_left[0])) / 2
     y = top_left[1] - (height - abs(bottom_right[1] - top_left[1])) / 2
-    return f'<rect class="{_attribute(issue.visual_role)}" data-issue-id="{_attribute(issue.issue_id)}" x="{_number(x)}" y="{_number(y)}" width="{_number(width)}" height="{_number(height)}" vector-effect="non-scaling-stroke"/>'
+    classes = f"{issue.visual_role} {extra_class}".strip()
+    return f'<rect class="{_attribute(classes)}" data-issue-id="{_attribute(issue.issue_id)}" x="{_number(x)}" y="{_number(y)}" width="{_number(width)}" height="{_number(height)}" vector-effect="non-scaling-stroke"/>'
 
 
 def _issue_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> list[str]:
@@ -136,9 +137,64 @@ def _issue_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> list[str
             parts.append(_entity_svg(issue.actual_geometry, "inaccurate-actual", transform, "-actual"))
         output.append(f'<g {issue_attr} data-role="inaccurate">{"".join(parts)}</g>')
     elif issue.visual_role == "connectivity":
-        region = _region_svg(issue, transform)
+        elements: list[str] = []
+        meas = issue.measurement if isinstance(issue.measurement, dict) else {}
+        actual_pts = meas.get("actual_points")
+        if actual_pts and isinstance(actual_pts, (list, tuple)) and len(actual_pts) >= 2:
+            # Confirmed endpoint gap: localized endpoint rings + connector line showing the gap
+            screen_pts = [
+                transform.point((float(p[0]), float(p[1])))
+                for p in actual_pts
+                if isinstance(p, (list, tuple)) and len(p) >= 2
+            ]
+            if len(screen_pts) >= 2:
+                p1, p2 = screen_pts[0], screen_pts[1]
+                elements.append(
+                    f'<line class="connectivity-connector" '
+                    f'data-issue-id="{_attribute(issue.issue_id)}" '
+                    f'x1="{_number(p1[0])}" y1="{_number(p1[1])}" '
+                    f'x2="{_number(p2[0])}" y2="{_number(p2[1])}" '
+                    f'vector-effect="non-scaling-stroke"/>'
+                )
+                for sp in screen_pts:
+                    elements.append(
+                        f'<circle class="connectivity-endpoint" '
+                        f'data-issue-id="{_attribute(issue.issue_id)}" '
+                        f'cx="{_number(sp[0])}" cy="{_number(sp[1])}" r="3.5" '
+                        f'vector-effect="non-scaling-stroke"/>'
+                    )
+        elif actual_pts and isinstance(actual_pts, (list, tuple)) and len(actual_pts) == 1:
+            p = actual_pts[0]
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                sp = transform.point((float(p[0]), float(p[1])))
+                elements.append(
+                    f'<circle class="connectivity-endpoint" '
+                    f'data-issue-id="{_attribute(issue.issue_id)}" '
+                    f'cx="{_number(sp[0])}" cy="{_number(sp[1])}" r="3.5" '
+                    f'vector-effect="non-scaling-stroke"/>'
+                )
+        elif issue.actual_geometry:
+            elements.append(_entity_svg(issue.actual_geometry, "connectivity-entity", transform, "-conn-actual"))
+        elif issue.region:
+            mid_x = (issue.region[0] + issue.region[2]) / 2
+            mid_y = (issue.region[1] + issue.region[3]) / 2
+            sp = transform.point((mid_x, mid_y))
+            elements.append(
+                f'<circle class="connectivity-junction" '
+                f'data-issue-id="{_attribute(issue.issue_id)}" '
+                f'cx="{_number(sp[0])}" cy="{_number(sp[1])}" r="4" '
+                f'vector-effect="non-scaling-stroke"/>'
+            )
+
+        # Technical details: large bounding rectangle is placed behind technical-only class
+        region = _region_svg(issue, transform, extra_class="connectivity-region technical-only")
         if region:
-            output.append(f'<g {issue_attr} data-role="connectivity">{region}</g>')
+            elements.append(region)
+
+        if elements:
+            output.append(f'<g {issue_attr} data-role="connectivity">{"".join(elements)}</g>')
+        else:
+            output.append(f'<g {issue_attr} data-role="connectivity" class="connectivity" data-geometry="unavailable"></g>')
     else:
         region = _region_svg(issue, transform)
         if region:

@@ -3,13 +3,14 @@
 ## Verdict
 
 **READY FOR CODEX REVIEW.** The repaired implementation passes all verification criteria:
-- Complete automated test suite: **457 passed, 7 dependency deprecation warnings in 23.47 s**.
+- Complete automated test suite: **466 passed, 7 dependency deprecation warnings in 26.13 s**.
 - Live headless browser QA (Playwright / Edge):
   - `scripts/qa_reference_object_tags.cjs`: **6/6 passed** (defaults, assignment-type enforcement, reference object proposals, student underlay visibility across error filters, PDF downloads).
   - `scripts/qa_interactive_legend.cjs`: **12/12 passed** (all 9 legend controls, two-way sync, pointer hit testing, zoom/pan preservation, header credit & contrast).
   - `scripts/qa_review_usability.cjs`: **11/11 passed** (zoom/pan, selection preservation, download error recovery, repeated reviews).
+  - `scripts/qa_connectivity_presentation.cjs`: **6/6 passed** (Gaps & Connections terminology and approved contract text, localized endpoint markers and connector line, hidden bounding box by default, toggle technical details, supporting finding selection with plain-language feedback and no extra deduction, pan/zoom preservation).
 - JavaScript syntax: `node --check app/static/app.js` — PASS.
-- CAD policy check: **PASS; 0 tracked DXF/DWG files; 56 historical commits inspected**.
+- CAD policy check: **PASS; 0 tracked DXF/DWG files; 57 historical commits inspected**.
 - Checkpoint commit preserved: `98dc3fc` (`checkpoint(codex): preserve repaired reference object tags implementation awaiting browser acceptance`).
 - Separate worktree isolation: `fix/issue-5-partial-ellipse-rendering` in the primary repo root checkout remains untouched.
 
@@ -64,6 +65,28 @@
 
 ### 7. UI Heading Cleanup
 - In `app/templates/index.html`, renamed heading to `<h2>Detected geometric features</h2>` to resolve ambiguous duplicated headings.
+
+### 8. Connectivity Repairs: Gaps & Connections Terminology & Localized Evidence
+- **Clear Terminology**:
+  - Renamed the visible "Connectivity" label to **"Gaps & Connections"** across overlay legend buttons, findings filters, and PDF report labels while preserving internal identifiers (`data-role="connectivity"`, `visual_role="connectivity"`).
+  - Integrated the exact required contract explanation:
+    > *"Highlights places where drawing elements do not connect as required by the reference, such as gaps between endpoints or broken junctions. Intentional openings are not errors. Supporting findings may carry no additional deduction."*
+  - Populated in the viewport `#connectivity-explanation` banner, button `title` tooltips, and PDF legend descriptions.
+- **Localized, Evidence-Based Visual Markers**:
+  - Replaced large overlapping magenta bounding boxes with localized markers:
+    - Confirmed endpoint gaps render a connector line (`<line class="connectivity-connector">`) between actual endpoints and small rings (`<circle class="connectivity-endpoint">`) at each endpoint.
+    - Other connection issues highlight the affected geometry or junction (`<circle class="connectivity-junction">` or `<line class="connectivity-entity">`).
+    - Bounding boxes are relegated to technical details (`.connectivity-region.technical-only`) and hidden by default (`display: none`), toggled only via "Show technical details".
+    - Coordinates and distances are derived directly from actual endpoints and measured gaps, never invented from bounding boxes.
+- **Plain-Language Finding Feedback & Scored Evidence Separation**:
+  - Findings list and selected issue details explain what failed, where it occurred, why connection is expected, and include distance, tolerance, and units when available (e.g. *"Endpoint gap of 2.000 mm exceeds tolerance (0.500 mm). Connect endpoints at this junction as required by the reference."*).
+  - Supporting connection findings carry no additional deduction (`applied_deduction == 0.0`) and display `"Supporting connection evidence — No additional deduction"`.
+  - Intentional reference openings / terminals are recognized as valid and not flagged as errors.
+  - Supporting connectivity findings remain collapsed by default in both Issue List (`<details class="supporting-findings-collapse">`) and PDF report; expanding discloses full evidence.
+- **Context Preservation**:
+  - Selecting Gaps & Connections retains the complete student drawing as a readable, neutral underlay (`opacity: 0.40; pointer-events: none`).
+  - Active zoom and pan coordinates are preserved when switching visual roles or selecting findings. Locate centers graphics only on deliberate user click.
+
 
 ---
 
@@ -139,4 +162,5 @@ $env:DRAFTLENS_QA_URL = 'http://127.0.0.1:8017'
 node scripts/qa_reference_object_tags.cjs
 node scripts/qa_interactive_legend.cjs
 node scripts/qa_review_usability.cjs
+node scripts/qa_connectivity_presentation.cjs
 ```

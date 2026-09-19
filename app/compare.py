@@ -952,6 +952,32 @@ def compare_drawings(reference: Drawing, student: Drawing, t: Tolerances | None 
                 f"Move the entity by {abs(measurement['actual']):.3f} "
                 "drawing units toward the expected location."
             )
+        elif finding.category == "endpoint_gap":
+            dist = (
+                finding.actual
+                if isinstance(finding.actual, (int, float))
+                else (measurement.get("distance") or measurement.get("actual") if measurement else None)
+            )
+            tol = measurement.get("tolerance") if measurement else None
+            unit_str = measurement.get("unit") if measurement and measurement.get("unit") else "drawing units"
+            if isinstance(dist, (int, float)) and isinstance(tol, (int, float)):
+                action = (
+                    f"Endpoint gap of {dist:.3f} {unit_str} exceeds tolerance ({tol:.3f} {unit_str}). "
+                    "Connect endpoints at this junction as required by the reference."
+                )
+            elif isinstance(dist, (int, float)):
+                action = (
+                    f"Endpoint gap of {dist:.3f} {unit_str} at this junction. "
+                    "Restore the expected connection as required by the reference."
+                )
+            else:
+                action = "Restore the expected endpoint connection at this junction as required by the reference."
+        elif finding.category == "disconnected_geometry":
+            action = "Connect the disconnected element to adjacent geometry as required by the reference."
+        elif finding.category == "unwanted_intersection":
+            action = "Trim or adjust elements to eliminate the unwanted intersection as required by the reference."
+        elif finding.category == "overlapping_geometry":
+            action = "Resolve overlapping elements at this connection as required by the reference."
         issues.append(
             Issue(
                 id=finding.issue_id or f"E-{len(issues) + 1:03d}",

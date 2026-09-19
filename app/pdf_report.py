@@ -117,7 +117,7 @@ _LEGEND_ENTRIES = (
     ("missing", "Missing", "Required reference geometry absent from the submission"),
     ("extra", "Extra", "Unmatched geometry found only in the submission"),
     ("inaccurate", "Inaccurate", "Matched geometry outside the approved tolerance"),
-    ("connectivity", "Connectivity", "Junction, closure, or topology evidence"),
+    ("connectivity", "Gaps & Connections", "Highlights places where drawing elements do not connect as required by the reference, such as gaps between endpoints or broken junctions. Intentional openings are not errors. Supporting findings may carry no additional deduction."),
     ("warning", "Warning", "Non-critical advisory or validation note"),
     ("critical", "Critical", "Severe validation or assessment condition"),
 )
@@ -222,7 +222,35 @@ class ReviewedDrawingFlowable(Flowable):
             elif issue.visual_role == "inaccurate":
                 if issue.expected_geometry: self._entity(issue.expected_geometry, "inaccurate-expected", transform)
                 if issue.actual_geometry: self._entity(issue.actual_geometry, "inaccurate-actual", transform)
-            elif issue.visual_role in {"connectivity", "warning", "critical"}: self._region(issue, transform, issue.visual_role)
+            elif issue.visual_role == "connectivity":
+                meas = issue.measurement if isinstance(issue.measurement, dict) else {}
+                actual_pts = meas.get("actual_points")
+                if actual_pts and isinstance(actual_pts, (list, tuple)) and len(actual_pts) >= 2:
+                    p1 = self._point(transform, (float(actual_pts[0][0]), float(actual_pts[0][1])))
+                    p2 = self._point(transform, (float(actual_pts[1][0]), float(actual_pts[1][1])))
+                    _set_role_style(self.canv, "connectivity")
+                    self.canv.setDash([2, 2])
+                    self.canv.line(p1[0], p1[1], p2[0], p2[1])
+                    self.canv.setDash([])
+                    self.canv.setFillColor(colors.white)
+                    self.canv.circle(p1[0], p1[1], 2.2, stroke=1, fill=1)
+                    self.canv.circle(p2[0], p2[1], 2.2, stroke=1, fill=1)
+                elif actual_pts and isinstance(actual_pts, (list, tuple)) and len(actual_pts) == 1:
+                    p1 = self._point(transform, (float(actual_pts[0][0]), float(actual_pts[0][1])))
+                    _set_role_style(self.canv, "connectivity")
+                    self.canv.setFillColor(colors.white)
+                    self.canv.circle(p1[0], p1[1], 2.2, stroke=1, fill=1)
+                elif issue.actual_geometry:
+                    self._entity(issue.actual_geometry, "connectivity", transform)
+                elif issue.region:
+                    mid_x = (issue.region[0] + issue.region[2]) / 2
+                    mid_y = (issue.region[1] + issue.region[3]) / 2
+                    pt = self._point(transform, (mid_x, mid_y))
+                    _set_role_style(self.canv, "connectivity")
+                    self.canv.circle(pt[0], pt[1], 2.5, stroke=1, fill=1)
+                else:
+                    self._region(issue, transform, "connectivity")
+            elif issue.visual_role in {"warning", "critical"}: self._region(issue, transform, issue.visual_role)
         if transform.empty and not self.reviewed.reference_entities and not self.reviewed.student_entities:
             self.canv.setFillColor(colors.HexColor("#718096")); self.canv.setFont(FONT_NAME, 9); self.canv.drawCentredString(self.width/2, self.height/2, "No drawable geometry")
         self.canv.restoreState()
@@ -412,7 +440,7 @@ def _issue_story(
             sup_rows.append([
                 _p(sup.get("issue_id", "Issue"), styles["body"]),
                 _p(sup_title, styles["body"]),
-                _p(sup.get("technical_feedback") or "Supporting topology evidence", styles["body"]),
+                _p(sup.get("technical_feedback") or "Supporting connection evidence", styles["body"]),
             ])
         sup_table = Table(sup_rows, colWidths=[width * .25, width * .25, width * .5],
                           repeatRows=1, splitByRow=1, splitInRow=1)
@@ -428,7 +456,7 @@ def _issue_story(
         ]))
         output.extend([
             Spacer(1, 3),
-            _p("Supporting topology findings (linked evidence)", styles["h2"]),
+            _p("Supporting topology findings (linked gaps & connections evidence)", styles["h2"]),
             sup_table,
         ])
     output.append(Spacer(1,5)); return output
@@ -703,7 +731,7 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
     if include_appendix:
         story.append(PageBreak())
         story.append(_p("Technical Appendix", styles["title"]))
-        story.append(_p("Comprehensive diagnostic evidence, all supporting topology findings, and complete unsupported entity records.", styles["subtitle"]))
+        story.append(_p("Comprehensive diagnostic evidence, all supporting gaps & connections findings, and complete unsupported entity records.", styles["subtitle"]))
 
         all_supporting = [issue for issue in all_issues if issue.get("finding_role") == "supporting"]
         if presentation["compacted"]:
@@ -713,7 +741,7 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
                     continue
                 story.append(KeepTogether(_issue_story(issue, styles, width)))
         if all_supporting:
-            story.append(_p("All supporting topology findings", styles["h1"]))
+            story.append(_p("All supporting gaps & connections findings", styles["h1"]))
             for issue in all_supporting:
                 story.append(KeepTogether(_issue_story(issue, styles, width)))
 

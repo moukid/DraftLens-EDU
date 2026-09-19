@@ -800,6 +800,9 @@ def analyze_comparison(
             primary.supporting_evidence.append(evidence)
         measurement = _measurement(evidence)
         measurement["region"] = list(gap.region)
+        measurement["expected_point"] = list(gap.expected_point)
+        measurement["actual_points"] = [list(point) for point in gap.actual_points]
+        measurement["distance"] = gap.distance
         measurement["linked_primary_category"] = (
             primary.category if primary is not None else None
         )

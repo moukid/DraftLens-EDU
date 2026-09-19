@@ -321,9 +321,29 @@ def build_reviewed_drawing(
             loc_for_region = raw_loc
 
         visual_role = _role(category, severity)
+        meas = deepcopy(raw_issue.get("measurement"))
+        if visual_role == "connectivity" and isinstance(meas, dict) and (ref_to_stu_dx or ref_to_stu_dy):
+            if "region" in meas and isinstance(meas["region"], (list, tuple)) and len(meas["region"]) == 4:
+                meas["region"] = [
+                    round(float(meas["region"][0]) + ref_to_stu_dx, 6),
+                    round(float(meas["region"][1]) + ref_to_stu_dy, 6),
+                    round(float(meas["region"][2]) + ref_to_stu_dx, 6),
+                    round(float(meas["region"][3]) + ref_to_stu_dy, 6),
+                ]
+            if "actual_points" in meas and isinstance(meas["actual_points"], (list, tuple)):
+                meas["actual_points"] = [
+                    [round(float(p[0]) + ref_to_stu_dx, 6), round(float(p[1]) + ref_to_stu_dy, 6)]
+                    for p in meas["actual_points"]
+                    if isinstance(p, (list, tuple)) and len(p) >= 2
+                ]
+            if "expected_point" in meas and isinstance(meas["expected_point"], (list, tuple)) and len(meas["expected_point"]) >= 2:
+                meas["expected_point"] = [
+                    round(float(meas["expected_point"][0]) + ref_to_stu_dx, 6),
+                    round(float(meas["expected_point"][1]) + ref_to_stu_dy, 6),
+                ]
         if visual_role == "connectivity":
             region = _union_regions(
-                _measurement_region(raw_issue.get("measurement")),
+                _measurement_region(meas),
                 _location_region(loc_for_region),
             )
         else:
@@ -359,7 +379,7 @@ def build_reviewed_drawing(
             confidence=str(raw_issue.get("confidence") or "instructor_review_required"),
             classification=str(raw_issue.get("classification") or "primary"),
             provenance="comparison",
-            measurement_json=json.dumps(deepcopy(raw_issue.get("measurement")), sort_keys=True, separators=(",", ":"), default=str),
+            measurement_json=json.dumps(meas, sort_keys=True, separators=(",", ":"), default=str),
             correction_guidance_json=json.dumps(deepcopy(raw_issue.get("correction_guidance")), sort_keys=True, separators=(",", ":"), default=str),
             recommended_commands=tuple(str(command) for command in raw_issue.get("recommended_commands", [])),
         ))

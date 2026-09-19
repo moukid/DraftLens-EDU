@@ -348,11 +348,12 @@
             <li><button type="button" class="legend-filter-btn legend-missing" data-role="missing" aria-pressed="false">Missing</button></li>
             <li><button type="button" class="legend-filter-btn legend-extra" data-role="extra" aria-pressed="false">Extra</button></li>
             <li><button type="button" class="legend-filter-btn legend-inaccurate" data-role="inaccurate" aria-pressed="false">Inaccurate</button></li>
-            <li><button type="button" class="legend-filter-btn legend-connectivity" data-role="connectivity" aria-pressed="false">Connectivity</button></li>
+            <li><button type="button" class="legend-filter-btn legend-connectivity" data-role="connectivity" aria-pressed="false" title="Highlights places where drawing elements do not connect as required by the reference, such as gaps between endpoints or broken junctions. Intentional openings are not errors. Supporting findings may carry no additional deduction.">Gaps &amp; Connections</button></li>
             <li><button type="button" class="legend-filter-btn legend-warning" data-role="warning" aria-pressed="false">Warning</button></li>
             <li><button type="button" class="legend-filter-btn legend-critical" data-role="critical" aria-pressed="false">Critical</button></li>
           </ul>
           <p id="student-only-status" class="student-only-status" hidden>Student submission only &mdash; DraftLens overlays are hidden.</p>
+          <p id="connectivity-explanation" class="role-explanation" hidden>Highlights places where drawing elements do not connect as required by the reference, such as gaps between endpoints or broken junctions. Intentional openings are not errors. Supporting findings may carry no additional deduction.</p>
         </section>
 
         <section id="object-correspondence-card" class="panel object-correspondence-card" aria-labelledby="correspondence-heading" hidden>
@@ -392,7 +393,7 @@
               <button type="button" data-filter="missing" aria-pressed="false">Missing</button>
               <button type="button" data-filter="extra" aria-pressed="false">Extra</button>
               <button type="button" data-filter="inaccurate" aria-pressed="false">Inaccurate</button>
-              <button type="button" data-filter="connectivity" aria-pressed="false">Connectivity</button>
+              <button type="button" data-filter="connectivity" aria-pressed="false" title="Highlights places where drawing elements do not connect as required by the reference, such as gaps between endpoints or broken junctions. Intentional openings are not errors. Supporting findings may carry no additional deduction.">Gaps &amp; Connections</button>
               <button type="button" data-filter="warning" aria-pressed="false">Warnings</button>
               <button type="button" data-filter="critical" aria-pressed="false">Critical</button>
             </div>
@@ -426,7 +427,7 @@
               </dl>
               <div id="feedback-commands" hidden>
                 <h3>How to correct</h3>
-                <p id="guidance-supporting-label" class="guidance-supporting" hidden>Supporting topology evidence</p>
+                <p id="guidance-supporting-label" class="guidance-supporting" hidden>Supporting connection evidence · No additional deduction</p>
                 <p id="guidance-related" hidden>Resolve linked primary issue: <strong id="guidance-related-id">—</strong></p>
                 <dl class="guidance-list">
                   <div id="guidance-primary-row"><dt>Primary correction</dt><dd id="guidance-primary">—</dd></div>

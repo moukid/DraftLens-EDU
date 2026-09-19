@@ -386,7 +386,7 @@ def test_pdf_report_export_is_independent_of_browser_filter_and_retains_complete
     # Verify dedicated drawing page (Page 2) contains full vector legend with all 8 roles
     p2_text = reader.pages[1].extract_text() or ""
     assert "Drawing overlay legend" in p2_text
-    for role_label in ["Reference", "Student", "Missing", "Extra", "Inaccurate", "Connectivity", "Warning", "Critical"]:
+    for role_label in ["Reference", "Student", "Missing", "Extra", "Inaccurate", "Gaps & Connections", "Warning", "Critical"]:
         assert role_label in p2_text
 
 

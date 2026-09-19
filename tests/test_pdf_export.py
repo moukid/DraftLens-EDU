@@ -420,7 +420,7 @@ LEGEND_EXPLANATIONS = {
     "Missing": "Required reference geometry absent from the submission",
     "Extra": "Unmatched geometry found only in the submission",
     "Inaccurate": "Matched geometry outside the approved tolerance",
-    "Connectivity": "Junction, closure, or topology evidence",
+    "Gaps & Connections": "Highlights places where drawing elements do not connect as required by the reference, such as gaps between endpoints or broken junctions. Intentional openings are not errors. Supporting findings may carry no additional deduction.",
     "Warning": "Non-critical advisory or validation note",
     "Critical": "Severe validation or assessment condition",
 }

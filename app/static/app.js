@@ -237,6 +237,10 @@ if (viewerExitExpandButton) viewerExitExpandButton.addEventListener("click", () 
 if (toggleTechnicalDetailsCheckbox) {
   toggleTechnicalDetailsCheckbox.addEventListener("change", () => {
     showTechnicalDetails = toggleTechnicalDetailsCheckbox.checked;
+    const viewport = byId("drawing-viewport");
+    if (viewport) {
+      viewport.classList.toggle("show-technical-details", showTechnicalDetails);
+    }
     renderIssueList();
     if (state.selectedIssueId) {
       const sel = (state.review && state.review.issues || []).find((i) => i.issue_id === state.selectedIssueId);
@@ -2066,7 +2070,8 @@ function updateDrawingEmptyState(role) {
   }
   const hasGraphics = hasGraphicsForRole(role);
   if (!hasGraphics && role !== "all" && role !== "student" && role !== "reference") {
-    overlay.textContent = "No " + role + " indications";
+    const roleLabel = role === "connectivity" ? "gaps & connections" : role;
+    overlay.textContent = "No " + roleLabel + " indications";
     overlay.hidden = false;
   } else {
     overlay.hidden = true;
@@ -2112,6 +2117,8 @@ function setActiveRole(role, preserveSelection = true) {
   if (viewStudentButton) viewStudentButton.setAttribute("aria-pressed", String(role === "student"));
   const statusEl = byId("student-only-status");
   if (statusEl) statusEl.hidden = role !== "student";
+  const connExp = byId("connectivity-explanation");
+  if (connExp) connExp.hidden = role !== "connectivity";
   const legendEl = byId("overlay-legend");
   if (legendEl) legendEl.hidden = false;
 
@@ -2331,7 +2338,8 @@ function renderCorrectionGuidance(issue) {
   resetCorrectionGuidance();
   const guidance = issue.correction_guidance;
   if (!guidance) return;
-  if (findingRole(issue) !== "primary") return;
+  const role = findingRole(issue);
+  if (role !== "primary" && role !== "supporting") return;
 
   const primary = guidance.primary_command || "";
   const alternatives = Array.isArray(guidance.alternative_commands) ? guidance.alternative_commands : [];
@@ -2358,7 +2366,28 @@ function renderCorrectionGuidance(issue) {
 function formatMeasurement(measurement) {
   if (measurement === null || measurement === undefined) return "No numeric measurement";
   if (typeof measurement !== "object") return String(measurement);
-  const entries = Object.entries(measurement);
+  if (measurement.property === "endpoint_gap" || measurement.distance !== undefined) {
+    const dist = measurement.distance !== undefined ? measurement.distance : measurement.actual;
+    const tol = measurement.tolerance;
+    const unit = measurement.unit || "drawing units";
+    let summary = "Gap distance: " + formatNumber(dist) + " " + unit;
+    if (tol !== undefined && tol !== null) summary += " (Tolerance: " + formatNumber(tol) + " " + unit + ")";
+    if (!showTechnicalDetails) return summary;
+    const extra = [];
+    if (Array.isArray(measurement.actual_points) && measurement.actual_points.length) {
+      extra.push("Endpoints: " + measurement.actual_points.map(p => "(" + p.map(formatNumber).join(", ") + ")").join(", "));
+    }
+    if (Array.isArray(measurement.expected_point) && measurement.expected_point.length) {
+      extra.push("Expected junction: (" + measurement.expected_point.map(formatNumber).join(", ") + ")");
+    }
+    return [summary, ...extra].join(" · ");
+  }
+  const entries = Object.entries(measurement).filter(([key]) => {
+    if (!showTechnicalDetails && (key === "region" || key === "actual_points" || key === "expected_point" || key === "affected_reference_entity_ids" || key === "affected_student_entity_ids")) {
+      return false;
+    }
+    return true;
+  });
   if (!entries.length) return "No numeric measurement";
   return entries.map(([key, value]) => humanize(key) + ": " + formatEvidenceValue(value)).join(" · ");
 }
@@ -2407,6 +2436,7 @@ function formatNumber(value) {
 }
 
 function humanize(value) {
+  if (value === "connectivity") return "Gaps & Connections";
   return String(value || "not specified").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
