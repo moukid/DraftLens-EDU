@@ -82,6 +82,28 @@ def test_standalone_line_endpoints_are_intentional_terminals():
     assert len(graph.components[0].intentional_terminal_endpoint_ids) == 2
 
 
+def test_identical_dense_endpoint_chain_has_no_false_diameter_gap():
+    reference = [line(f"R-{n}", (n, 0), (n, 1000)) for n in range(20)]
+    student = [line(f"S-{n}", (n, 0), (n, 1000), source="student") for n in range(20)]
+    result = compare_topology(drawing(*reference), drawing(*student),
+                              matched(reference, student), tolerance=2)
+    assert result.junctions
+    assert result.endpoint_gaps == ()
+    assert all(item.status == "preserved" for item in result.junctions)
+
+
+def test_broken_local_contact_in_endpoint_chain_uses_measured_pair():
+    reference = [line(f"R-{n}", (n, 0), (n, 1000)) for n in range(3)]
+    student = [line(f"S-{n}", (n, 3 if n == 2 else 0), (n, 1000),
+                    source="student") for n in range(3)]
+    result = compare_topology(drawing(*reference), drawing(*student),
+                              matched(reference, student), tolerance=1.1)
+    assert len(result.endpoint_gaps) == 1
+    gap = result.endpoint_gaps[0]
+    assert set(gap.actual_points) == {(1, 0), (2, 3)}
+    assert gap.distance == pytest.approx(10 ** 0.5)
+
+
 def test_standalone_arc_endpoints_are_intentional_terminals():
     graph = build_topology(
         drawing(arc("R-A", (0, 0), 5, 0, 90)), tolerance=0.1

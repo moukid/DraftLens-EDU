@@ -311,7 +311,6 @@ def build_reviewed_drawing(
             and isinstance(raw_loc, (list, tuple))
             and len(raw_loc) >= 2
             and (ref_to_stu_dx or ref_to_stu_dy)
-            and source_id is None
         ):
             loc_for_region = (
                 round(float(raw_loc[0]) + ref_to_stu_dx, 6),

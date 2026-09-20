@@ -325,8 +325,11 @@ def test_exact_copy_and_supporting_findings_remain_distinct_in_reports():
     supporting = [issue for issue in displaced["issues"] if issue["finding_role"] == "supporting"]
     assert all(issue["applied_deduction"] == 0 for issue in supporting)
     displaced_text = _text(_reader(_pdf(displaced)))
-    assert "Supporting topology findings" in displaced_text
-    assert all(issue["issue_id"] in displaced_text for issue in supporting)
+    assert "See technical appendix for evidence" in displaced_text
+    assert all(issue["issue_id"] not in displaced_text for issue in supporting)
+    appendix = client.get(f"/api/reviews/{displaced['review_id']}/report.pdf?include_appendix=true")
+    appendix_text = _text(_reader(appendix))
+    assert all(issue["issue_id"] in appendix_text for issue in supporting)
 
 
 def test_reference_notes_are_reported_separately_with_zero_deduction():
@@ -482,7 +485,9 @@ def test_full_overlay_legend_is_unconditional_and_preserves_controlled_reports(
     report_text = _text(reader)
     assert f"{float(score):g} / 100" in report_text
     assert normalization_text in report_text
-    assert all(issue["issue_id"] in report_text for issue in review["issues"])
+    assert all(issue["issue_id"] in report_text for issue in review["issues"] if issue["finding_role"] != "supporting")
+    appendix_text = _text(_reader(client.get(f"/api/reviews/{review['review_id']}/report.pdf?include_appendix=true")))
+    assert all(issue["issue_id"] in appendix_text for issue in review["issues"])
     _assert_full_pdf_legend(reader)
 
 

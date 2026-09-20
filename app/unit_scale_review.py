@@ -125,6 +125,8 @@ def evaluate_unit_scale_review(
         and stu_unit in METRIC_FACTORS_TO_METERS
         and factor is not None
         and factor > 1e-9
+        and scale_diagnostic.scale_confidence in {"high", "verified"}
+        and scale_diagnostic.scale_support_count >= 3
     ):
         expected_ratio = (
             METRIC_FACTORS_TO_METERS[ref_unit] / METRIC_FACTORS_TO_METERS[stu_unit]
@@ -133,7 +135,10 @@ def evaluate_unit_scale_review(
             physically_consistent = True
             flags.append("units_scale_physically_consistent")
 
-    factor_explanation = format_scale_factor_direction(factor)
+    factor_explanation = (
+        "Insufficient corresponding geometry to establish a relative scale factor."
+        if insufficient else format_scale_factor_direction(factor)
+    )
 
     # Determine primary diagnostic state
     if physically_consistent:

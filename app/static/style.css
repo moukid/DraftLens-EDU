@@ -1225,6 +1225,8 @@ body.viewer-is-expanded {
   margin: 10px 0;
 }
 .reference-object-card {
+  flex-wrap: wrap;
+  min-width: 0;
   padding: 8px 10px;
   background: var(--surface-card);
   border: 1px solid var(--border);
@@ -1243,11 +1245,16 @@ body.viewer-is-expanded {
   text-decoration: line-through;
 }
 .reference-object-meta {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .reference-object-actions {
+  flex-wrap: wrap;
+  min-width: 0;
   display: flex;
   gap: 6px;
 }
@@ -1383,6 +1390,8 @@ body.viewer-is-expanded {
   margin: 3px 0;
 }
 .reference-object-preview-panel {
+  min-width: 0;
+  max-width: 100%;
   margin: 10px 0;
   padding: 8px;
   border: 1px solid var(--border);
@@ -1393,6 +1402,10 @@ body.viewer-is-expanded {
   display: flex;
   gap: 5px;
   justify-content: flex-end;
+}
+.reference-objects-panel input, .reference-objects-panel select {
+  min-width: 0;
+  max-width: 100%;
 }
 #reference-object-preview {
   display: block;

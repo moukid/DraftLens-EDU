@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib,html,json,os,uuid
+import hashlib,html,json,math,os,uuid
 from dataclasses import dataclass
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -99,9 +99,7 @@ async def run_uploaded_pipeline(
         else None
     )
     custom_info_layers = (
-        set(object_record.get("configuration", {}).get("custom_info_layers", []))
-        if confirmed_objects is not None
-        else None
+        set(REFERENCE_OBJECT_INSPECTIONS.get(ref_id, object_record or {}).get("configuration", {}).get("custom_info_layers", []))
     )
     if rubric and rubric.filename:
         raise HTTPException(409, "Inline rubric uploads are no longer accepted. Approve and associate the rubric before grading.")
@@ -291,7 +289,7 @@ async def reference_objects_inspect(
             parts = [float(x.strip()) for x in legend_bbox.split(",")]
         except ValueError as exc:
             raise HTTPException(422, "Legend exclusion region must contain four numeric coordinates.") from exc
-        if len(parts) != 4 or parts[0] >= parts[2] or parts[1] >= parts[3]:
+        if len(parts) != 4 or not all(math.isfinite(value) for value in parts) or parts[0] >= parts[2] or parts[1] >= parts[3]:
             raise HTTPException(422, "Legend exclusion region must be x_min, y_min, x_max, y_max.")
         legend_region = (parts[0], parts[1], parts[2], parts[3])
 
@@ -352,6 +350,20 @@ async def reference_objects_inspect(
     ).hexdigest()
     proposals = {obj.occurrence_id: obj.to_dict() for obj in objects}
     entity_by_id = {entity.id: entity for entity in base_drawing.entities}
+    previous_inspection = REFERENCE_OBJECT_INSPECTIONS.get(ref_id)
+    stored = REFERENCE_OBJECTS.get(ref_id)
+    previous_token = (previous_inspection or stored or {}).get("inspection_token")
+    configuration_changed = previous_token != inspection_token and (
+        previous_token is not None or bool(legend_region or mappings or custom_layers)
+    )
+    approval_invalidated = False
+    if configuration_changed:
+        previous_rubric_id = REFERENCE_RUBRICS.pop(ref_id, None)
+        if previous_rubric_id and previous_rubric_id in RUBRICS:
+            RUBRICS[previous_rubric_id] = RUBRICS[previous_rubric_id].model_copy(update={"approved": False})
+            approval_invalidated = True
+        REFERENCE_OBJECTS.pop(ref_id, None)
+        stored = None
     REFERENCE_OBJECT_INSPECTIONS[ref_id] = {
         "inspection_token": inspection_token,
         "configuration": configuration,
@@ -359,7 +371,6 @@ async def reference_objects_inspect(
         "entity_by_id": entity_by_id,
     }
 
-    stored = REFERENCE_OBJECTS.get(ref_id)
     object_payload = (
         stored["objects"]
         if stored and stored.get("inspection_token") == inspection_token
@@ -374,6 +385,8 @@ async def reference_objects_inspect(
     return {
         "reference_id": ref_id,
         "inspection_token": inspection_token,
+        "approval_invalidated": approval_invalidated,
+        "definitions_saved": bool(stored and stored.get("inspection_token") == inspection_token),
         "declared_units": full_drawing.units,
         "units_code": full_drawing.units_code,
         "plan_markers": [marker.to_dict() for marker in plan_markers],
@@ -436,12 +449,8 @@ def reference_objects_confirm(request: ObjectConfirmationRequest):
             if entity_by_id[member_id].bbox is not None
         ]
         selected_bounds = (
-            {
-                "min_x": min(box[0] for box in selected_boxes),
-                "min_y": min(box[1] for box in selected_boxes),
-                "max_x": max(box[2] for box in selected_boxes),
-                "max_y": max(box[3] for box in selected_boxes),
-            }
+            [min(box[0] for box in selected_boxes), min(box[1] for box in selected_boxes),
+             max(box[2] for box in selected_boxes), max(box[3] for box in selected_boxes)]
             if selected_boxes
             else None
         )

@@ -46,7 +46,10 @@ def test_dense_and_single_long_supporting_rows_paginate_without_losing_ids(count
         reader = PdfReader(io.BytesIO(pdf))
         text = '\n'.join(page.extract_text() for page in reader.pages)
         for issue in snapshot.review_response['issues']:
-            assert issue['issue_id'] in text
+            if appendix or issue['finding_role'] != 'supporting':
+                assert issue['issue_id'] in text
+            else:
+                assert issue['issue_id'] not in text
         assert 'Reviewed drawing' in reader.pages[1].extract_text()
         assert 'Drawing overlay legend' in reader.pages[1].extract_text()
         assert snapshot.review_response['issues'][0]['issue_id'] in reader.pages[2].extract_text()

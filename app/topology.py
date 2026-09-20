@@ -668,15 +668,24 @@ def compare_topology(
         distance: float | None = None
         status = "unavailable"
         actual_node_ids: tuple[str, ...] = ()
+        evidence_endpoint_ids = connection.endpoint_ids
         if all(actual_endpoints):
             resolved_endpoints = [item for item in actual_endpoints if item is not None]
             actual_node_ids = tuple(sorted({item.node_id for item in resolved_endpoints}))
             if connection.kind == "endpoint_endpoint":
-                actual_points = tuple(item.point for item in resolved_endpoints)
-                distance = max(
-                    (math.dist(first, second) for first, second in combinations(actual_points, 2)),
-                    default=0.0,
-                )
+                # A tolerance cluster can be a chain, not a clique. Preserve
+                # only the local contacts actually required by the reference.
+                required_pairs = [
+                    (math.dist(endpoint_map[first].point, endpoint_map[second].point),
+                     first, second)
+                    for first, second in combinations(connection.endpoint_ids, 2)
+                    if math.dist(reference_endpoint_by_id[first].point,
+                                 reference_endpoint_by_id[second].point) <= tolerance
+                ]
+                if required_pairs:
+                    distance, first, second = max(required_pairs)
+                    evidence_endpoint_ids = (first, second)
+                    actual_points = (endpoint_map[first].point, endpoint_map[second].point)
             else:
                 interior_reference_id = connection.interior_entity_ids[0]
                 interior_student_id = entity_map.get(interior_reference_id)
@@ -720,7 +729,7 @@ def compare_topology(
                 endpoint_id,
                 endpoint_map[endpoint_id],
             )
-            for endpoint_id in connection.endpoint_ids
+            for endpoint_id in evidence_endpoint_ids
             if endpoint_id in endpoint_map
         ]
         _, primary_endpoint_id, primary_student_endpoint = max(

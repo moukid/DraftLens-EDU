@@ -560,6 +560,14 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
         story.extend([notice_cell, Spacer(1, 3)])
 
     unit_review = response.get("unit_scale_review") or {}
+    if unit_review:
+        story.append(_p(
+            f"Declared units: reference {unit_review.get('reference_declared_unit', 'unspecified')}; "
+            f"student {unit_review.get('student_declared_unit', 'unspecified')}. "
+            f"Intended assignment unit: {unit_review.get('intended_unit', 'unspecified')} "
+            f"({'instructor confirmed' if unit_review.get('intended_unit_confirmed') else 'not confirmed'}).",
+            styles["small"],
+        ))
     if unit_review.get("prominent_notice"):
         unit_msg = unit_review["prominent_notice"]
         if unit_review.get("acknowledged"):
@@ -618,7 +626,7 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
     # --- PAGES 3+: Primary Feedback Pages ---
     story.extend([
         _p("Finding details", styles["title"]),
-        _p("Primary actionable findings and correction guidance. Supporting evidence is linked under primary findings.", styles["subtitle"]),
+        _p("Primary actionable findings and correction guidance. Optional supporting evidence is available in the technical appendix.", styles["subtitle"]),
     ])
     story.extend(_finding_summary_story(response, styles, width))
 
@@ -641,13 +649,16 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
         for issue in primary_issues:
             linked_ids = linked_map.get(issue["issue_id"]) or []
             linked_supporting = [issue_by_id[lid] for lid in linked_ids if lid in issue_by_id]
-            detail = _issue_story(issue, styles, width, linked_supporting=linked_supporting,
+            visible_supporting = linked_supporting if include_appendix else []
+            detail = _issue_story(issue, styles, width, linked_supporting=visible_supporting,
                                   compact=presentation["compacted"])
-            if linked_supporting:
+            if visible_supporting:
                 # A multi-page evidence table must not push the heading to an empty page.
                 story.extend(detail)
             else:
                 story.append(KeepTogether(detail))
+                if linked_supporting:
+                    story.append(_p(f"{len(linked_supporting)} supporting connection finding(s); no additional deduction. See technical appendix for evidence.", styles["small"]))
 
     if summarized_primary:
         story.append(_p("Additional actionable findings", styles["h1"]))
@@ -700,6 +711,14 @@ def generate_pdf(snapshot: ReviewSnapshot, *, include_appendix: bool = False) ->
             story.append(KeepTogether(_issue_story(issue, styles, width)))
 
     object_correspondence = response.get("student_object_correspondence") or []
+    object_summary = response.get("reference_objects_summary")
+    if object_summary:
+        story.append(_p(
+            f"Reference object expectations: {object_summary.get('confirmed_count', 0)} confirmed; "
+            f"{object_summary.get('unresolved_count', 0)} unresolved; {object_summary.get('excluded_count', 0)} excluded. "
+            "Member correspondence below is a preview, not automatic object recognition or object scoring.",
+            styles["body"],
+        ))
     if object_correspondence:
         story.append(_p("Architectural object correspondence (Preview)", styles["h1"]))
         obj_rows = [[

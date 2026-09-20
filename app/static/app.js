@@ -150,6 +150,7 @@ if (applyLegendFilterButton) {
     if (customLayersVal) form.append("custom_info_layers", customLayersVal);
     try {
       const resp = await requestJson("/api/reference/objects/inspect", {method: "POST", body: form});
+      if (resp.approval_invalidated) markRubricDirty();
       renderReferenceObjects(resp);
     } catch (err) {
       showError(err);
@@ -250,6 +251,10 @@ if (toggleTechnicalDetailsCheckbox) {
 }
 if (typeof window !== "undefined" && window.addEventListener) {
   window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && byId("reference-object-preview-panel")?.classList.contains("is-expanded")) {
+      byId("reference-object-preview-panel").classList.remove("is-expanded");
+      byId("object-preview-expand").textContent = "Expand";
+    }
     if (e.key === "Escape" && viewerNav.isExpanded) {
       setExpandedView(false);
     }
@@ -951,12 +956,13 @@ function canRunReview() {
     state.reference &&
     state.student &&
     state.referenceCanContinue &&
+    !state.referenceObjectData?.dirty &&
     (state.rubricId || fallbackInput.checked)
   );
 }
 
 function updateReviewAvailability() {
-  reviewButton.disabled = state.loading || !canRunReview();
+  reviewButton.disabled = state.loading || Boolean(state.referenceObjectData?.dirty) || !canRunReview();
 }
 
 function updateReportAvailability() {
@@ -1357,6 +1363,13 @@ function drawReferenceObjectPreview() {
       graphic.setAttribute("cx", points[0][0]);
       graphic.setAttribute("cy", -points[0][1]);
       graphic.setAttribute("r", geometry.radius);
+    } else if (entity.entity_type === "ARC" && points.length && Number.isFinite(Number(geometry.radius))) {
+      const start = Number(geometry.start_angle) * Math.PI / 180;
+      const end = Number(geometry.end_angle) * Math.PI / 180;
+      const span = ((Number(geometry.end_angle) - Number(geometry.start_angle)) % 360 + 360) % 360;
+      const [x, y] = points[0], radius = Number(geometry.radius);
+      graphic = document.createElementNS(namespace, "path");
+      graphic.setAttribute("d", `M ${x + radius * Math.cos(start)} ${-y - radius * Math.sin(start)} A ${radius} ${radius} 0 ${span > 180 ? 1 : 0} 0 ${x + radius * Math.cos(end)} ${-y - radius * Math.sin(end)}`);
     } else if (points.length > 1) {
       graphic = document.createElementNS(namespace, entity.closed ? "polygon" : "polyline");
       graphic.setAttribute("points", points.map((point) => point[0] + "," + (-point[1])).join(" "));
@@ -1384,7 +1397,7 @@ function drawReferenceObjectPreview() {
       selected.status = selected.member_entity_ids.length
         ? (String(selected.meaning).startsWith("Unmapped (") ? "unresolved" : "proposed")
         : "detected";
-      state.referenceObjectsConfirmed = false;
+      markReferenceObjectsDirty();
       renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
     });
     svg.append(graphic);
@@ -1430,14 +1443,25 @@ function drawReferenceObjectPreview() {
   };
 }
 
+function markReferenceObjectsDirty() {
+  state.referenceObjectsConfirmed = false;
+  if (state.referenceObjectData) {
+    state.referenceObjectData.definitions_saved = false;
+    state.referenceObjectData.dirty = true;
+  }
+  resetReview();
+  updateReviewAvailability();
+}
+
 function renderReferenceObjects(data) {
   const panel = byId("reference-objects-panel");
   if (!panel) return;
   if (data && data.inspection_token) {
+    const changedInspection = state.referenceObjectInspectionToken !== data.inspection_token;
     state.referenceObjectData = data;
     state.referenceObjectInspectionToken = data.inspection_token;
     state.availableReferenceEntities = data.available_entities || [];
-    state.referencePreviewView = null;
+    if (changedInspection) state.referencePreviewView = null;
   } else if (state.referenceObjectData) {
     data = {...state.referenceObjectData, ...(data || {})};
   }
@@ -1448,7 +1472,7 @@ function renderReferenceObjects(data) {
 
   state.referenceObjects = objects;
   state.referenceObjectsSummary = summary;
-  state.referenceObjectsConfirmed = objects.length > 0
+  state.referenceObjectsConfirmed = Boolean(data.definitions_saved) && objects.length > 0
     && objects.every((obj) => ["confirmed", "unresolved", "excluded"].includes(obj.status));
   if (!objects.some((obj) => obj.occurrence_id === state.selectedReferenceObjectId)) {
     state.selectedReferenceObjectId = objects.length ? objects[0].occurrence_id : null;
@@ -1506,7 +1530,7 @@ function renderReferenceObjects(data) {
         remove.addEventListener("click", () => {
           obj.member_entity_ids = obj.member_entity_ids.filter((id) => id !== entityId);
           obj.status = obj.member_entity_ids.length ? "proposed" : "detected";
-          state.referenceObjectsConfirmed = false;
+          markReferenceObjectsDirty();
           renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
         });
         item.append(remove);
@@ -1523,7 +1547,7 @@ function renderReferenceObjects(data) {
       notes.maxLength = 500;
       notes.placeholder = "Instructor notes (optional)";
       notes.value = obj.notes || "";
-      notes.addEventListener("input", () => { obj.notes = notes.value; });
+      notes.addEventListener("input", () => { obj.notes = notes.value; markReferenceObjectsDirty(); });
       meta.append(notes);
     }
     card.append(meta);
@@ -1540,6 +1564,23 @@ function renderReferenceObjects(data) {
     });
     actions.append(inspectBtn);
 
+    const decision = document.createElement("select");
+    decision.setAttribute("aria-label", obj.occurrence_id + " decision");
+    [["proposed", "Review proposal"], ["unresolved", "Leave unresolved"], ["confirmed", "Confirm members"], ["excluded", "Exclude marker"]].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      decision.append(option);
+    });
+    decision.value = obj.status === "detected" ? "proposed" : obj.status;
+    decision.addEventListener("change", () => {
+      obj.status = decision.value;
+      obj.exclusion_reason = obj.status === "excluded" ? "Excluded by instructor." : null;
+      markReferenceObjectsDirty();
+      renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
+    });
+    actions.append(decision);
+
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "secondary-button compact-button";
@@ -1554,7 +1595,7 @@ function renderReferenceObjects(data) {
         obj.status = "excluded";
         obj.exclusion_reason = "Excluded by instructor during reference-object review.";
       }
-      state.referenceObjectsConfirmed = false;
+      markReferenceObjectsDirty();
       renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
     });
     actions.append(toggleBtn);
@@ -1573,15 +1614,16 @@ async function confirmReferenceObjects() {
   const statusEl = byId("confirm-objects-status");
   statusEl.textContent = "Validating architectural object definitions...";
   try {
-    state.referenceObjects.forEach((obj) => {
-      if (obj.status === "excluded") return;
+    const submittedObjects = state.referenceObjects.map((obj) => ({...obj}));
+    submittedObjects.forEach((obj) => {
+      if (["excluded", "unresolved"].includes(obj.status)) return;
       if (!obj.member_entity_ids.length || String(obj.meaning).startsWith("Unmapped (")) {
         obj.status = "unresolved";
       } else {
         obj.status = "confirmed";
       }
     });
-    const overlaps = objectMembershipOverlaps(state.referenceObjects.filter((obj) => obj.status === "confirmed"));
+    const overlaps = objectMembershipOverlaps(submittedObjects.filter((obj) => obj.status === "confirmed"));
     const overlapCheck = byId("overlap-ack-check");
     if (overlaps.length && (!overlapCheck || !overlapCheck.checked)) {
       throw new Error("Acknowledge overlapping memberships before confirmation.");
@@ -1595,18 +1637,20 @@ async function confirmReferenceObjects() {
         inspection_token: state.referenceObjectInspectionToken,
         rubric_id: state.rubricId,
         overlap_acknowledged: Boolean(overlaps.length && overlapCheck && overlapCheck.checked),
-        objects: state.referenceObjects,
+        objects: submittedObjects,
       }),
     });
     state.referenceObjects = resp.objects;
     state.referenceObjectsConfirmed = true;
+    state.referenceObjectData.definitions_saved = true;
+    state.referenceObjectData.dirty = false;
     if (resp.approval_invalidated) {
-      state.rubricId = null;
-      if (state.provisionalRubric) state.provisionalRubric.approved = false;
+      markRubricDirty();
       byId("rubric-status").textContent = "Object-definition changes require renewed rubric approval.";
       updateReviewAvailability();
     }
     renderReferenceObjects({...state.referenceObjectData, objects: state.referenceObjects});
+    updateReviewAvailability();
     statusEl.textContent = "Saved " + resp.confirmed_count + " confirmed, "
       + resp.unresolved_count + " unresolved, and " + resp.excluded_count + " excluded marker(s).";
     setWorkflowStatus("Architectural object definitions saved", "success");
