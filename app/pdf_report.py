@@ -198,6 +198,7 @@ class ReviewedDrawingFlowable(Flowable):
                     float(entity.properties.get("ratio", 1.0)),
                     entity.properties.get("start_param"),
                     entity.properties.get("end_param"),
+                    extrusion=entity.properties.get("extrusion"),
                 )
                 if sampled is not None and sampled:
                     path = self.canv.beginPath()
@@ -206,8 +207,16 @@ class ReviewedDrawingFlowable(Flowable):
                         path.lineTo(*self._point(transform, p))
                     self.canv.drawPath(path, stroke=1, fill=0)
                 else:
-                    rx = transform.length(math.hypot(float(major[0]), float(major[1]))); ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
-                    center = self._point(transform, points[0]); angle = math.degrees(math.atan2(float(major[1]), float(major[0])))
+                    from app.reviewed_dxf import project_ellipse_2d
+                    proj = project_ellipse_2d(major, float(entity.properties.get("ratio", 1.0)), entity.properties.get("extrusion"))
+                    if proj:
+                        rx, ry, angle_rad = proj
+                        rx = transform.length(rx); ry = transform.length(ry)
+                        angle = math.degrees(angle_rad)
+                    else:
+                        rx = transform.length(math.hypot(float(major[0]), float(major[1]))); ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
+                        angle = math.degrees(math.atan2(float(major[1]), float(major[0])))
+                    center = self._point(transform, points[0])
                     self.canv.saveState(); self.canv.translate(*center); self.canv.rotate(angle)
                     self.canv.ellipse(-rx, -ry, rx, ry, stroke=1, fill=0); self.canv.restoreState()
         elif entity.kind == "text" and points:

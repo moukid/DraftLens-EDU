@@ -8,6 +8,40 @@ from typing import Any
 
 from .models import Drawing, Entity
 
+def project_ellipse_2d(
+    major: tuple[float, ...],
+    ratio: float,
+    extrusion: tuple[float, ...] | None = None
+) -> tuple[float, float, float] | None:
+    """Project a 3D ellipse to a 2D ellipse (rx, ry, rotation_angle_radians)."""
+    ex, ey, ez = (0.0, 0.0, 1.0)
+    if extrusion and len(extrusion) >= 3:
+        ex, ey, ez = extrusion[:3]
+    elif extrusion and len(extrusion) == 2:
+        ex, ey = extrusion
+    vx, vy, vz = (0.0, 0.0, 0.0)
+    if len(major) >= 3:
+        vx, vy, vz = major[:3]
+    elif len(major) == 2:
+        vx, vy = major
+
+    from ezdxf.math import ConstructionEllipse
+    try:
+        e = ConstructionEllipse((0.0, 0.0, 0.0), (vx, vy, vz), (ex, ey, ez), ratio, 0.0, math.tau)
+        u_x, u_y = e.major_axis.x, e.major_axis.y
+        v_x, v_y = e.minor_axis.x, e.minor_axis.y
+        A = u_x**2 + v_x**2
+        C = u_y**2 + v_y**2
+        B = u_x*u_y + v_x*v_y
+        diff = A - C
+        hyp = math.hypot(diff, 2*B)
+        rx = math.sqrt(max(0.0, (A + C + hyp) / 2))
+        ry = math.sqrt(max(0.0, (A + C - hyp) / 2))
+        angle = math.atan2(2*B, diff) / 2
+        return rx, ry, angle
+    except Exception:
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewedEntity:
@@ -130,6 +164,7 @@ def sample_ellipse_arc(
     start_param: float | None,
     end_param: float | None,
     num_segments: int = 64,
+    extrusion: tuple[float, float, float] | list[float] | None = None,
 ) -> list[tuple[float, float]] | None:
     """Sample a partial DXF ellipse as an open sequence of 2D points.
 
@@ -145,6 +180,10 @@ def sample_ellipse_arc(
         r = abs(float(ratio))
         cx, cy = float(center[0]), float(center[1])
         vx, vy = float(major_axis[0]), float(major_axis[1])
+        vz = float(major_axis[2]) if len(major_axis) >= 3 else 0.0
+        ex = float(extrusion[0]) if extrusion and len(extrusion) >= 1 else 0.0
+        ey = float(extrusion[1]) if extrusion and len(extrusion) >= 2 else 0.0
+        ez = float(extrusion[2]) if extrusion and len(extrusion) >= 3 else 1.0
     except (TypeError, ValueError, IndexError):
         return None
 
@@ -156,42 +195,57 @@ def sample_ellipse_arc(
         and math.isfinite(cy)
         and math.isfinite(vx)
         and math.isfinite(vy)
+        and math.isfinite(vz)
+        and math.isfinite(ex)
+        and math.isfinite(ey)
+        and math.isfinite(ez)
     ):
         return None
 
-    tau = 2.0 * math.pi
-    diff = ep - sp
+    tau = math.tau
+    full_turn = sp + tau
 
-    # If the span covers 2*pi or more, it is a complete ellipse
-    if abs(diff) >= tau - 1e-5:
+    # A forward interval covering a full turn or more (start + tau) represents
+    # a complete ellipse. Deliberately partial intervals immediately below this boundary
+    # (e.g. math.nextafter(start + tau, -math.inf)) must remain partial.
+    if ep >= full_turn:
         return None
 
-    span = diff % tau
-    if span < 0:
-        span += tau
+    from ezdxf.math import ConstructionEllipse
 
-    # If span is practically 2*pi, or wrapped to 0 when diff > 1e-5
-    if abs(span - tau) < 1e-5 or (span <= 1e-7 and abs(diff) > 1e-5):
-        return None
+    # Truly equal parameters represent a degenerate single-point arc
+    if sp == ep:
+        try:
+            e = ConstructionEllipse((cx, cy, 0.0), (vx, vy, vz), (ex, ey, ez), r, sp, ep)
+            p = list(e.vertices([sp]))[0]
+            return [(p.x, p.y), (p.x, p.y)]
+        except Exception:
+            return None
 
-    wx, wy = -vy * r, vx * r
-
-    if span <= 1e-7:
-        p = (
-            cx + vx * math.cos(sp) + wx * math.sin(sp),
-            cy + vy * math.cos(sp) + wy * math.sin(sp),
-        )
-        return [p, p]
+    if ep > sp:
+        # Known positive forward partial interval strictly within (0, tau).
+        # We guard against subtraction rounding to tau (which would make modulo 0).
+        span = ep - sp
+        if span >= tau:
+            span = math.nextafter(tau, -math.inf)
+    else:
+        # Wrapped counterclockwise interval crossing 0/2*pi.
+        diff = ep - sp
+        span = diff % tau
+        if span <= 0.0:
+            span += tau
+        if span >= tau:
+            span = math.nextafter(tau, -math.inf)
 
     n = max(32, int(math.ceil(num_segments * (span / tau))))
-    points: list[tuple[float, float]] = []
-    for i in range(n + 1):
-        t = sp + span if i == n else sp + span * (i / n)
-        px = cx + vx * math.cos(t) + wx * math.sin(t)
-        py = cy + vy * math.cos(t) + wy * math.sin(t)
-        points.append((px, py))
+    step = span / n
+    params = [sp + i * step for i in range(n + 1)]
 
-    return points
+    try:
+        e = ConstructionEllipse((cx, cy, 0.0), (vx, vy, vz), (ex, ey, ez), r, sp, ep)
+        return [(p.x, p.y) for p in e.vertices(params)]
+    except Exception:
+        return None
 
 
 def _entity_bounds(entity: Entity) -> tuple[float, float, float, float] | None:
@@ -209,16 +263,26 @@ def _entity_bounds(entity: Entity) -> tuple[float, float, float, float] | None:
                 float(entity.properties.get("ratio", 1.0)),
                 entity.properties.get("start_param"),
                 entity.properties.get("end_param"),
+                extrusion=entity.properties.get("extrusion"),
             )
             if sampled is not None and sampled:
                 xs = [p[0] for p in sampled]
                 ys = [p[1] for p in sampled]
                 return (min(xs), min(ys), max(xs), max(ys))
+            proj = project_ellipse_2d(major, float(entity.properties.get("ratio", 1.0)), entity.properties.get("extrusion"))
+            if proj:
+                rx, ry, angle_rad = proj
+                hw = math.hypot(rx * math.cos(angle_rad), ry * math.sin(angle_rad))
+                hh = math.hypot(rx * math.sin(angle_rad), ry * math.cos(angle_rad))
+                x, y = points[0]
+                return (x - hw, y - hh, x + hw, y + hh)
             rx = math.hypot(float(major[0]), float(major[1]))
             ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
-            radius = max(rx, ry)
+            angle_rad = math.atan2(float(major[1]), float(major[0]))
+            hw = math.hypot(rx * math.cos(angle_rad), ry * math.sin(angle_rad))
+            hh = math.hypot(rx * math.sin(angle_rad), ry * math.cos(angle_rad))
             x, y = points[0]
-            return (x - radius, y - radius, x + radius, y + radius)
+            return (x - hw, y - hh, x + hw, y + hh)
     if points:
         xs, ys = zip(*points)
         return (min(xs), min(ys), max(xs), max(ys))

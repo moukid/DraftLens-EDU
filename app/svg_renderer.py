@@ -103,14 +103,21 @@ def _entity_svg(entity: ReviewedEntity, css_class: str, transform: CoordinateTra
                 float(entity.properties.get("ratio", 1.0)),
                 entity.properties.get("start_param"),
                 entity.properties.get("end_param"),
+                extrusion=entity.properties.get("extrusion"),
             )
             if sampled is not None and sampled:
                 transformed = [transform.point(p) for p in sampled]
                 d = "M " + " L ".join(f"{_number(p[0])} {_number(p[1])}" for p in transformed)
                 return f'<path {attrs} d="{d}" fill="none"/>'
-            rx = math.hypot(float(major[0]), float(major[1]))
-            ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
-            angle = -math.degrees(math.atan2(float(major[1]), float(major[0])))
+            from app.reviewed_dxf import project_ellipse_2d
+            proj = project_ellipse_2d(major, float(entity.properties.get("ratio", 1.0)), entity.properties.get("extrusion"))
+            if proj:
+                rx, ry, angle_rad = proj
+                angle = -math.degrees(angle_rad)
+            else:
+                rx = math.hypot(float(major[0]), float(major[1]))
+                ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
+                angle = -math.degrees(math.atan2(float(major[1]), float(major[0])))
             center = transform.point(points[0])
             return f'<ellipse {attrs} cx="{_number(center[0])}" cy="{_number(center[1])}" rx="{_number(transform.length(rx))}" ry="{_number(transform.length(ry))}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
     if entity.kind == "text" and points:

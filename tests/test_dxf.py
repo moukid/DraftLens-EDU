@@ -65,3 +65,20 @@ def test_canonicalizes_reversed_line_endpoints_and_reports_unsupported():
     assert line.points == [(0.0, 0.0), (10.0, 0.0)]
     assert drawing.units == "mm"
     assert drawing.unsupported_entities[0]["entity_type"] == "HATCH"
+
+
+def test_ellipse_major_axis_retains_z_component():
+    document = ezdxf.new("R2010")
+    modelspace = document.modelspace()
+    modelspace.add_ellipse(
+        center=(0, 0, 0),
+        major_axis=(10, 0, 5),
+        ratio=0.5,
+        dxfattribs={"extrusion": (0, 0, 1)}
+    )
+    drawing = parse_dxf_bytes(_dxf_bytes(document))
+    ellipse = next(entity for entity in drawing.entities if entity.kind == "ellipse")
+    
+    major_axis = ellipse.properties["major_axis"]
+    assert len(major_axis) == 3, "Major axis must retain its Z component"
+    assert major_axis == (10.0, 0.0, 5.0)
