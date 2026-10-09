@@ -218,7 +218,11 @@ class ReviewedDrawingFlowable(Flowable):
                         angle = math.degrees(math.atan2(float(major[1]), float(major[0])))
                     center = self._point(transform, points[0])
                     self.canv.saveState(); self.canv.translate(*center); self.canv.rotate(angle)
-                    self.canv.ellipse(-rx, -ry, rx, ry, stroke=1, fill=0); self.canv.restoreState()
+                    if rx < 1e-5 and ry < 1e-5: pass
+                    elif rx < 1e-5: self.canv.line(0, -ry, 0, ry)
+                    elif ry < 1e-5: self.canv.line(-rx, 0, rx, 0)
+                    else: self.canv.ellipse(-rx, -ry, rx, ry, stroke=1, fill=0)
+                    self.canv.restoreState()
         elif entity.kind == "text" and points:
             self.canv.setFont(FONT_NAME, 5.5); self.canv.drawString(*self._point(transform, points[0]), _display_text(entity.text or ""))
 

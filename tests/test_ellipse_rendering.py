@@ -287,7 +287,7 @@ def test_missing_optional_values_retain_backward_compatibility():
         points=[(10.0, 20.0)],
         properties={"major_axis": [10.0, 0.0], "ratio": 0.5},
     )
-    ref = Drawing(entities=[ent], bbox=(0.0, 10.0, 20.0, 30.0))
+    ref = Drawing(entities=[ent], bbox=(0.0, 15.0, 20.0, 25.0))
     empty = Drawing([], (0, 0, 0, 0))
     reviewed = build_reviewed_drawing(ref, empty, {"score": 100, "issues": []})
     svg = render_svg(reviewed)
@@ -299,7 +299,7 @@ def test_missing_optional_values_retain_backward_compatibility():
     assert "rx" in el.attrib and "ry" in el.attrib
 
     bounds = _entity_bounds(ent)
-    assert bounds == (0.0, 10.0, 20.0, 30.0)
+    assert bounds == (0.0, 15.0, 20.0, 25.0)
 
 
 def test_circle_circular_arc_and_full_ellipse_rendering_remain_unchanged():
