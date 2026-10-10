@@ -14,6 +14,9 @@ SUPPORTED = {"LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ARC", "ELLIPSE", "SPLI
 def _xy(value):
     return round(float(value[0]), 6), round(float(value[1]), 6)
 
+def _xyz(value):
+    return round(float(value[0]), 6), round(float(value[1]), 6), round(float(value[2]), 6)
+
 def _canonical_polyline(points, closed):
     pts = [tuple(p) for p in points]
     if not pts:
@@ -73,8 +76,9 @@ def parse_dxf_bytes(data: bytes, source: str = "reference", normalize: bool = Tr
         elif kind == "ARC":
             entity = Entity(kind="arc", points=[_xy(raw.dxf.center)], radius=float(raw.dxf.radius), start_angle=float(raw.dxf.start_angle), end_angle=float(raw.dxf.end_angle), **base)
         elif kind == "ELLIPSE":
-            major = _xy(raw.dxf.major_axis)
-            entity = Entity(kind="ellipse", points=[_xy(raw.dxf.center)], properties={"major_axis": major, "ratio": float(raw.dxf.ratio), "start_param": float(raw.dxf.start_param), "end_param": float(raw.dxf.end_param)}, **base)
+            major = _xyz(raw.dxf.major_axis)
+            extrusion = _xyz(raw.dxf.extrusion) if raw.dxf.hasattr("extrusion") else (0.0, 0.0, 1.0)
+            entity = Entity(kind="ellipse", points=[_xy(raw.dxf.center)], properties={"major_axis": major, "ratio": float(raw.dxf.ratio), "start_param": float(raw.dxf.start_param), "end_param": float(raw.dxf.end_param), "extrusion": extrusion}, **base)
         elif kind == "SPLINE":
             tool = raw.construction_tool()
             points = [_xy(p) for p in tool.approximate(40)]

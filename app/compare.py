@@ -72,6 +72,11 @@ def _geometry_signature(
     relative: bool,
     precision: int = GEOMETRY_PRECISION,
 ) -> tuple[Any, ...]:
+    filtered_properties = {
+        key: (value[:2] if key == "major_axis" and isinstance(value, (tuple, list)) else value)
+        for key, value in entity.properties.items()
+        if key != "extrusion"
+    }
     return (
         entity.kind,
         entity.layer,
@@ -82,7 +87,7 @@ def _geometry_signature(
         None if entity.measurement is None else round(float(entity.measurement), precision),
         entity.closed,
         entity.text,
-        _freeze(entity.properties),
+        _freeze(filtered_properties),
     )
 
 
