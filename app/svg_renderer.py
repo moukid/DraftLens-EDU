@@ -119,7 +119,16 @@ def _entity_svg(entity: ReviewedEntity, css_class: str, transform: CoordinateTra
                 ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
                 angle = -math.degrees(math.atan2(float(major[1]), float(major[0])))
             center = transform.point(points[0])
-            return f'<ellipse {attrs} cx="{_number(center[0])}" cy="{_number(center[1])}" rx="{_number(transform.length(rx))}" ry="{_number(transform.length(ry))}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
+            srx = transform.length(rx)
+            sry = transform.length(ry)
+            if srx < 1e-5 or sry < 1e-5:
+                if srx < 1e-5 and sry < 1e-5:
+                    return ""
+                if sry < srx:
+                    return f'<line {attrs} x1="{_number(center[0]-srx)}" y1="{_number(center[1])}" x2="{_number(center[0]+srx)}" y2="{_number(center[1])}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
+                else:
+                    return f'<line {attrs} x1="{_number(center[0])}" y1="{_number(center[1]-sry)}" x2="{_number(center[0])}" y2="{_number(center[1]+sry)}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
+            return f'<ellipse {attrs} cx="{_number(center[0])}" cy="{_number(center[1])}" rx="{_number(srx)}" ry="{_number(sry)}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
     if entity.kind == "text" and points:
         point = transform.point(points[0])
         return f'<text {attrs} x="{_number(point[0])}" y="{_number(point[1])}">{escape(entity.text or "")}</text>'

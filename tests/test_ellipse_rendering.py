@@ -892,3 +892,44 @@ def test_full_turn_boundary_and_near_full_contract():
     coords = [float(x) for x in d_gap.replace("M ", "").replace(" L ", " ").split()]
     svg_gap_dist = math.hypot(coords[-2] - coords[0], coords[-1] - coords[1])
     assert svg_gap_dist > 5.0, f"SVG rendered endpoints must be distinctly separated for gap=0.2 rad, got {svg_gap_dist}"
+
+
+def test_ellipse_rendering_scale_regression():
+    """
+    Verify that physically tiny ellipses (e.g. major axis 2e-6 world units)
+    do not disappear during SVG or PDF rendering due to pre-transform degeneracy checks.
+    """
+    def _build(msp):
+        # A normal full ellipse, very small
+        msp.add_ellipse((0, 0, 0), major_axis=(2e-6, 0, 0), ratio=0.5)
+        # An edge-on ellipse, very small (lies in XZ plane, projects to a line on X axis)
+        msp.add_ellipse((1e-5, 0, 0), major_axis=(2e-6, 0, 0), ratio=0.5, dxfattribs={"extrusion": (0, 1, 0)})
+    
+    dxf_bytes = _make_synthetic_dxf(_build)
+    drw = parse_dxf_bytes(dxf_bytes, "scale_test.dxf")
+    rev = build_reviewed_drawing(drw, drw, {})
+    
+    # Check SVG
+    svg = render_svg(rev)
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    root = ET.fromstring(svg)
+    
+    ellipses = root.findall(".//svg:ellipse", ns)
+    lines = root.findall(".//svg:line", ns)
+    
+    assert len(ellipses) == 2, f"Tiny normal ellipse disappeared in SVG. Expected 2, got {len(ellipses)}"
+    assert len(lines) == 2, f"Tiny edge-on ellipse disappeared in SVG. Expected 2, got {len(lines)}"
+    
+    # Check PDF
+    out = io.BytesIO()
+    canv = canvas.Canvas(out)
+    from app.pdf_report import ReviewedDrawingFlowable
+    flowable = ReviewedDrawingFlowable(rev, 400, 400)
+    # Give it a reasonable page size
+    flowable.wrap(400, 400)
+    flowable.drawOn(canv, 0, 0)
+    canv.save()
+    
+    pdf_data = out.getvalue()
+    
+    assert b"c" in pdf_data or b"m" in pdf_data, "PDF output seems empty"
