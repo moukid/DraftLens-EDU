@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import PurePath
 import re
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 AssignmentType = Literal[
@@ -28,7 +28,10 @@ SCORE_CATEGORY_BY_CHECK: dict[str, str] = {
     "unwanted_intersection": "geometry",
     "overlapping_geometry": "geometry",
     "missing_geometry": "completion",
+    "missing_object": "completion",
+    "missing_part": "completion",
     "open_polyline": "completion",
+    "construction_policy": "quality",
     "extra_geometry": "quality",
     "duplicate_geometry": "quality",
     "unsupported_entity": "quality",
@@ -44,12 +47,12 @@ CATEGORY_DEFINITIONS: dict[str, str] = {
 }
 
 class ToleranceProfile(BaseModel):
-    position: float = Field(2.0, ge=0)
-    length: float = Field(1.0, ge=0)
-    angle: float = Field(3.0, ge=0)
-    radius: float = Field(1.0, ge=0)
-    dimension: float = Field(1.0, ge=0)
-    vertex: float = Field(1.0, ge=0)
+    position: float = Field(2.0, ge=0, allow_inf_nan=False)
+    length: float = Field(1.0, ge=0, allow_inf_nan=False)
+    angle: float = Field(3.0, ge=0, allow_inf_nan=False)
+    radius: float = Field(1.0, ge=0, allow_inf_nan=False)
+    dimension: float = Field(1.0, ge=0, allow_inf_nan=False)
+    vertex: float = Field(1.0, ge=0, allow_inf_nan=False)
 
 class RubricRule(BaseModel):
     id: str
@@ -71,11 +74,16 @@ class Rubric(BaseModel):
     title: str = "DraftLens assignment rubric"
     assignment_title: str = "Assignment"
     approved: bool = False
+    rubric_version: Literal["1.0", "2.0"] = "1.0"
     assignment_type: AssignmentType | None = None
     categories: list[RubricCategory]
     tolerances: ToleranceProfile = Field(default_factory=ToleranceProfile)
     normalization_mode: Literal["strict", "translation", "translation_rotation", "instructor_defined"] = "translation"
-    completion_scoring_mode: Literal["rule_based", "proportional"] = "rule_based"
+    completion_scoring_mode: Literal["rule_based", "proportional", "object_part_deduction"] = "rule_based"
+    missing_part_deduction: float = Field(1.0, ge=0, allow_inf_nan=False)
+    construction_requirement: Literal["geometry_only", "closed_polyline"] = "geometry_only"
+    assessment_mode: Literal["formative", "summative"] = "summative"
+    confirmed_objects: list[dict[str, Any]] | None = None
     accepted_alternatives: list[str] = Field(default_factory=list)
     rubric_source: Literal[
         "baseline_template", "instructor_modified", "explicit_fallback"
@@ -124,6 +132,47 @@ def default_rubric(title: str = "Geometric accuracy rubric") -> Rubric:
         RubricCategory(id="quality", name="File quality", weight=10, max_deduction=10, rules=quality),
     ])
 
+
+def rubric_v2(
+    title: str = "Geometric accuracy rubric",
+    *,
+    completion_scoring_mode: Literal[
+        "rule_based", "proportional", "object_part_deduction"
+    ] = "proportional",
+    approved: bool = True,
+) -> Rubric:
+    return default_rubric(title).model_copy(
+        update={
+            "approved": approved,
+            "rubric_version": "2.0",
+            "completion_scoring_mode": completion_scoring_mode,
+        }
+    )
+
+
+def instructor_square_rubric(
+    *,
+    missing_part_deduction: float = 1.0,
+    construction_requirement: Literal[
+        "geometry_only", "closed_polyline"
+    ] = "geometry_only",
+    normalization_mode: Literal["strict", "translation"] = "translation",
+    approved: bool = True,
+) -> Rubric:
+    return default_rubric().model_copy(
+        update={
+            "approved": approved,
+            "rubric_version": "2.0",
+            "completion_scoring_mode": "object_part_deduction",
+            "missing_part_deduction": missing_part_deduction,
+            "construction_requirement": construction_requirement,
+            "normalization_mode": normalization_mode,
+            "rubric_source": "instructor_modified",
+            "rubric_modified_by_instructor": True,
+        }
+    )
+
+
 def rubric_rule_map(rubric: Rubric):
     categories = {category.id: category for category in rubric.categories}
     mapping = {}
@@ -140,11 +189,16 @@ def rubric_rule_map(rubric: Rubric):
 
 
 def rubric_contract(rubric: Rubric) -> dict[str, object]:
+    is_formative = getattr(rubric, "assessment_mode", "summative") == "formative"
     return {
         "assignment_title": rubric.assignment_title,
         "rubric_source": rubric.rubric_source,
         "rubric_template_name": rubric.rubric_template_name,
         "rubric_modified_by_instructor": rubric.rubric_modified_by_instructor,
+        "completion_scoring_mode": rubric.completion_scoring_mode,
+        "missing_part_deduction": None if is_formative else rubric.missing_part_deduction,
+        "construction_requirement": rubric.construction_requirement,
+        "assessment_mode": rubric.assessment_mode,
         "category_definitions": dict(CATEGORY_DEFINITIONS),
     }
 

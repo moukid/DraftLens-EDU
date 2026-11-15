@@ -4,10 +4,10 @@ from html import escape
 import math
 from typing import Any
 
-from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue
+from .reviewed_dxf import ReviewedDrawing, ReviewedEntity, ReviewedIssue, sample_ellipse_arc
 
 
-SVG_STYLE = """svg{background:#fff}g{vector-effect:non-scaling-stroke}.reference{fill:none;stroke:#2f855a;stroke-width:1;opacity:.42}.student{fill:none;stroke:#24313a;stroke-width:1.35}.missing{fill:none;stroke:#ed8936;stroke-width:3;stroke-dasharray:9 6}.extra{fill:none;stroke:#3182ce;stroke-width:3}.inaccurate-expected{fill:none;stroke:#ed8936;stroke-width:2;stroke-dasharray:7 5}.inaccurate-actual{fill:none;stroke:#e53e3e;stroke-width:3}.connectivity{fill:none;stroke:#d53f8c;stroke-width:3}.warning{fill:#ecc94b;fill-opacity:.12;stroke:#b7791f;stroke-width:2;stroke-dasharray:4 4}.critical{fill:#e53e3e;fill-opacity:.12;stroke:#c53030;stroke-width:3}.entity-text{font:12px sans-serif;fill:currentColor;stroke:none}.empty{font:14px sans-serif;fill:#718096;stroke:none}"""
+SVG_STYLE = """svg{background:#fff}g{vector-effect:non-scaling-stroke}.reference{fill:none;stroke:#2f855a;stroke-width:1;opacity:.42}.aligned-reference{fill:none;stroke:#2f855a;stroke-width:1;opacity:.42}.student{fill:none;stroke:#24313a;stroke-width:1.35}.missing{fill:none;stroke:#f97316;stroke-width:1.2;stroke-dasharray:3 2}.extra{fill:none;stroke:#3182ce;stroke-width:2}.inaccurate-expected{fill:none;stroke:#f87171;stroke-width:1.5;stroke-dasharray:4 3}.inaccurate-actual{fill:none;stroke:#dc2626;stroke-width:2}.connectivity{fill:none;stroke:#d53f8c;stroke-width:2}.warning{fill:#ecc94b;fill-opacity:.12;stroke:#b7791f;stroke-width:1.5;stroke-dasharray:4 4}.critical{fill:#e53e3e;fill-opacity:.12;stroke:#c53030;stroke-width:2.5}.reference-note{fill:#38a169;fill-opacity:.12;stroke:#276749;stroke-width:1.5;stroke-dasharray:3 3}.entity-text{font:12px sans-serif;fill:currentColor;stroke:none}.empty{font:14px sans-serif;fill:#718096;stroke:none}"""
 
 
 def _number(value: float) -> str:
@@ -66,10 +66,12 @@ def _points(points: tuple[tuple[float, float], ...], transform: CoordinateTransf
 
 def _entity_svg(entity: ReviewedEntity, css_class: str, transform: CoordinateTransform, suffix: str) -> str:
     classes = css_class + (" entity-text" if entity.kind == "text" else "")
+    eid = f"{entity.entity_id}-aligned" if css_class == "aligned-reference" else entity.entity_id
+    source = "aligned-reference" if css_class == "aligned-reference" else entity.source
     attrs = (
         f'class="{_attribute(classes)}" '
-        f'data-entity-id="{_attribute(entity.entity_id)}" '
-        f'data-source="{_attribute(entity.source)}" '
+        f'data-entity-id="{_attribute(eid)}" '
+        f'data-source="{_attribute(source)}" '
         f'data-layer="{_attribute(entity.layer)}" '
         f'data-render-key="{_attribute(entity.entity_id + suffix)}" '
         'vector-effect="non-scaling-stroke"'
@@ -97,11 +99,38 @@ def _entity_svg(entity: ReviewedEntity, css_class: str, transform: CoordinateTra
     if entity.kind == "ellipse" and points:
         major = entity.properties.get("major_axis", [0.0, 0.0])
         if len(major) >= 2:
-            rx = math.hypot(float(major[0]), float(major[1]))
-            ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
-            angle = -math.degrees(math.atan2(float(major[1]), float(major[0])))
+            sampled = sample_ellipse_arc(
+                points[0],
+                major,
+                float(entity.properties.get("ratio", 1.0)),
+                entity.properties.get("start_param"),
+                entity.properties.get("end_param"),
+                extrusion=entity.properties.get("extrusion"),
+            )
+            if sampled is not None and sampled:
+                transformed = [transform.point(p) for p in sampled]
+                d = "M " + " L ".join(f"{_number(p[0])} {_number(p[1])}" for p in transformed)
+                return f'<path {attrs} d="{d}" fill="none"/>'
+            from app.reviewed_dxf import project_ellipse_2d
+            proj = project_ellipse_2d(major, float(entity.properties.get("ratio", 1.0)), entity.properties.get("extrusion"))
+            if proj:
+                rx, ry, angle_rad = proj
+                angle = -math.degrees(angle_rad)
+            else:
+                rx = math.hypot(float(major[0]), float(major[1]))
+                ry = rx * abs(float(entity.properties.get("ratio", 1.0)))
+                angle = -math.degrees(math.atan2(float(major[1]), float(major[0])))
             center = transform.point(points[0])
-            return f'<ellipse {attrs} cx="{_number(center[0])}" cy="{_number(center[1])}" rx="{_number(transform.length(rx))}" ry="{_number(transform.length(ry))}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
+            srx = transform.length(rx)
+            sry = transform.length(ry)
+            if srx < 1e-5 or sry < 1e-5:
+                if srx < 1e-5 and sry < 1e-5:
+                    return ""
+                if sry < srx:
+                    return f'<line {attrs} x1="{_number(center[0]-srx)}" y1="{_number(center[1])}" x2="{_number(center[0]+srx)}" y2="{_number(center[1])}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
+                else:
+                    return f'<line {attrs} x1="{_number(center[0])}" y1="{_number(center[1]-sry)}" x2="{_number(center[0])}" y2="{_number(center[1]+sry)}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
+            return f'<ellipse {attrs} cx="{_number(center[0])}" cy="{_number(center[1])}" rx="{_number(srx)}" ry="{_number(sry)}" transform="rotate({_number(angle)} {_number(center[0])} {_number(center[1])})"/>'
     if entity.kind == "text" and points:
         point = transform.point(points[0])
         return f'<text {attrs} x="{_number(point[0])}" y="{_number(point[1])}">{escape(entity.text or "")}</text>'
@@ -109,6 +138,25 @@ def _entity_svg(entity: ReviewedEntity, css_class: str, transform: CoordinateTra
 
 
 def _region_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> str:
+    if issue.visual_role == "connectivity":
+        meas = issue.measurement if isinstance(issue.measurement, dict) else {}
+        actual_points = meas.get("actual_points") or []
+        if len(actual_points) >= 2:
+            p1 = transform.point(actual_points[0])
+            p2 = transform.point(actual_points[1])
+            r1 = f'<circle class="connectivity" cx="{_number(p1[0])}" cy="{_number(p1[1])}" r="4" fill="none" vector-effect="non-scaling-stroke"/>'
+            r2 = f'<circle class="connectivity" cx="{_number(p2[0])}" cy="{_number(p2[1])}" r="4" fill="none" vector-effect="non-scaling-stroke"/>'
+            line = f'<line class="connectivity" x1="{_number(p1[0])}" y1="{_number(p1[1])}" x2="{_number(p2[0])}" y2="{_number(p2[1])}" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>'
+            return f'<g class="connectivity-marker" data-issue-id="{_attribute(issue.issue_id)}">{r1}{r2}{line}</g>'
+        elif len(actual_points) == 1:
+            p = transform.point(actual_points[0])
+            return f'<circle class="connectivity" data-issue-id="{_attribute(issue.issue_id)}" cx="{_number(p[0])}" cy="{_number(p[1])}" r="4" fill="none" vector-effect="non-scaling-stroke"/>'
+        elif issue.region:
+            min_x, min_y, max_x, max_y = issue.region
+            p = transform.point(((min_x + max_x) / 2.0, (min_y + max_y) / 2.0))
+            return f'<circle class="connectivity" data-issue-id="{_attribute(issue.issue_id)}" cx="{_number(p[0])}" cy="{_number(p[1])}" r="4" fill="none" vector-effect="non-scaling-stroke"/>'
+        return ""
+
     if not issue.region:
         return ""
     min_x, min_y, max_x, max_y = issue.region
@@ -124,21 +172,47 @@ def _region_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> str:
 def _issue_svg(issue: ReviewedIssue, transform: CoordinateTransform) -> list[str]:
     output: list[str] = []
     issue_attr = f'data-issue-id="{_attribute(issue.issue_id)}"'
-    if issue.visual_role == "missing" and issue.expected_geometry:
-        output.append(f'<g {issue_attr} data-role="missing">{_entity_svg(issue.expected_geometry, "missing", transform, "-missing")}</g>')
+    if issue.visual_role == "missing":
+        geoms = issue.expected_geometries or ((issue.expected_geometry,) if issue.expected_geometry else ())
+        if geoms:
+            parts = [_entity_svg(g, "missing", transform, f"-missing-{i}") for i, g in enumerate(geoms)]
+            output.append(f'<g {issue_attr} data-role="missing">{"".join(parts)}</g>')
     elif issue.visual_role == "extra" and issue.actual_geometry:
         output.append(f'<g {issue_attr} data-role="extra">{_entity_svg(issue.actual_geometry, "extra", transform, "-extra")}</g>')
     elif issue.visual_role == "inaccurate":
         parts = []
-        if issue.expected_geometry:
-            parts.append(_entity_svg(issue.expected_geometry, "inaccurate-expected", transform, "-expected"))
-        if issue.actual_geometry:
-            parts.append(_entity_svg(issue.actual_geometry, "inaccurate-actual", transform, "-actual"))
-        output.append(f'<g {issue_attr} data-role="inaccurate">{"".join(parts)}</g>')
+        exp_geoms = issue.expected_geometries or ((issue.expected_geometry,) if issue.expected_geometry else ())
+        for i, g in enumerate(exp_geoms):
+            parts.append(_entity_svg(g, "inaccurate-expected", transform, f"-expected-{i}"))
+        act_geoms = issue.actual_geometries or ((issue.actual_geometry,) if issue.actual_geometry else ())
+        for i, g in enumerate(act_geoms):
+            parts.append(_entity_svg(g, "inaccurate-actual", transform, f"-actual-{i}"))
+        is_detached_placement = (
+            issue.category == "incorrect_position"
+            and not issue.component_id
+            and bool(act_geoms)
+        )
+        placement_attr = ' data-placement-context="detached"' if is_detached_placement else ""
+        output.append(f'<g {issue_attr} data-role="inaccurate"{placement_attr}>{"".join(parts)}</g>')
     elif issue.visual_role == "connectivity":
         region = _region_svg(issue, transform)
         if region:
             output.append(f'<g {issue_attr} data-role="connectivity">{region}</g>')
+    elif issue.category == "ambiguous_geometry":
+        parts = []
+        region = _region_svg(issue, transform)
+        if region:
+            parts.append(region)
+        exp_geoms = issue.expected_geometries or ((issue.expected_geometry,) if issue.expected_geometry else ())
+        for i, g in enumerate(exp_geoms):
+            parts.append(_entity_svg(g, "warning", transform, f"-expected-{i}"))
+        act_geoms = issue.actual_geometries or ((issue.actual_geometry,) if issue.actual_geometry else ())
+        for i, g in enumerate(act_geoms):
+            parts.append(_entity_svg(g, "warning", transform, f"-actual-{i}"))
+        if parts:
+            output.append(f'<g {issue_attr} data-role="warning">{"".join(parts)}</g>')
+        else:
+            output.append(f'<g {issue_attr} data-role="warning" class="warning" data-geometry="unavailable"></g>')
     else:
         region = _region_svg(issue, transform)
         if region:
@@ -164,6 +238,8 @@ def render_svg(reviewed: ReviewedDrawing, width: float = 1200, height: float = 8
         parts.append(f'<text class="empty" x="{_number(width / 2)}" y="{_number(height / 2)}" text-anchor="middle">No drawable geometry</text>')
     parts.append('<g data-layer="reference">')
     parts.extend(_entity_svg(entity, "reference", transform, "-reference") for entity in reviewed.reference_entities)
+    parts.append('</g><g data-layer="aligned-reference">')
+    parts.extend(_entity_svg(entity, "aligned-reference", transform, "-aligned-ref") for entity in getattr(reviewed, "aligned_reference_entities", ()))
     parts.append('</g><g data-layer="student">')
     parts.extend(_entity_svg(entity, "student", transform, "-student") for entity in reviewed.student_entities)
     parts.append('</g><g data-layer="issues">')

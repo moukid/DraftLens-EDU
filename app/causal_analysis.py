@@ -215,7 +215,34 @@ def _analyze_line(
     angle_changed = abs(angle_evidence["deviation"]) > tolerance.angle
     intrinsic_changed = length_changed or angle_changed
     pivot_aligned = min(endpoint_distances) <= tolerance.position
-    position_primary = position_changed and (not intrinsic_changed or not pivot_aligned)
+
+    contained_partial = False
+    if (
+        length_changed
+        and not angle_changed
+        and len(reference.points) >= 2
+        and len(student.points) >= 2
+    ):
+        p1, p2 = reference.points[0], reference.points[1]
+        q1, q2 = student.points[0], student.points[1]
+        L_ref = math.dist(p1, p2)
+        L_stu = math.dist(q1, q2)
+        if L_ref > 1e-6 and L_stu < L_ref - tolerance.length:
+            ux = (p2[0] - p1[0]) / L_ref
+            uy = (p2[1] - p1[1]) / L_ref
+            nx, ny = -uy, ux
+            d1 = (q1[0] - p1[0]) * nx + (q1[1] - p1[1]) * ny
+            d2 = (q2[0] - p1[0]) * nx + (q2[1] - p1[1]) * ny
+            if max(abs(d1), abs(d2)) <= tolerance.position:
+                t1 = (q1[0] - p1[0]) * ux + (q1[1] - p1[1]) * uy
+                t2 = (q2[0] - p1[0]) * ux + (q2[1] - p1[1]) * uy
+                t_min, t_max = min(t1, t2), max(t1, t2)
+                if t_min >= -tolerance.position and t_max <= L_ref + tolerance.position:
+                    contained_partial = True
+
+    position_primary = position_changed and (
+        not intrinsic_changed or (not pivot_aligned and not contained_partial)
+    )
 
     if position_primary:
         analysis.findings.append(
@@ -263,12 +290,17 @@ def _analyze_line(
 
     if position_changed and not position_primary:
         primary_category = "incorrect_length" if length_changed else "incorrect_angle"
+        reason = (
+            "centroid displacement is a consequence of contained partial geometry"
+            if contained_partial and not pivot_aligned
+            else "centroid displacement is a consequence of an aligned-pivot intrinsic edit"
+        )
         suppressed = _suppressed_position(
             reference,
             student,
             primary_category,
             centroid_evidence,
-            "centroid displacement is a consequence of an aligned-pivot intrinsic edit",
+            reason,
         )
         analysis.suppressed_findings.append(suppressed)
         primary = next(
@@ -350,13 +382,49 @@ def _analyze_circle(
     )
 
 
+def _line_overlap(
+    first: Entity,
+    second: Entity,
+    tolerance: ToleranceProfile,
+) -> tuple[float, float, float]:
+    """Calculate collinear overlap length and fractional coverage between two lines."""
+    if len(first.points) < 2 or len(second.points) < 2:
+        return 0.0, 0.0, 0.0
+    p1, p2 = first.points[0], first.points[1]
+    q1, q2 = second.points[0], second.points[1]
+    L1 = math.dist(p1, p2)
+    L2 = math.dist(q1, q2)
+    if L1 < 1e-6 or L2 < 1e-6:
+        return 0.0, 0.0, 0.0
+    ux, uy = (q2[0] - q1[0]) / L2, (q2[1] - q1[1]) / L2
+    nx, ny = -uy, ux
+    d1 = abs((p1[0] - q1[0]) * nx + (p1[1] - q1[1]) * ny)
+    d2 = abs((p2[0] - q1[0]) * nx + (p2[1] - q1[1]) * ny)
+    if d1 > tolerance.position or d2 > tolerance.position:
+        return 0.0, 0.0, 0.0
+    t1 = (p1[0] - q1[0]) * ux + (p1[1] - q1[1]) * uy
+    t2 = (p2[0] - q1[0]) * ux + (p2[1] - q1[1]) * uy
+    t_min, t_max = min(t1, t2), max(t1, t2)
+    o_min = max(0.0, t_min)
+    o_max = min(L2, t_max)
+    overlap = max(0.0, o_max - o_min)
+    return overlap, overlap / L1, overlap / L2
+
+
 def _coincident(
     first: Entity,
     second: Entity,
     tolerance: ToleranceProfile,
 ) -> bool:
+    if first is second or first.id == second.id:
+        return False
     if first.kind != second.kind:
         return False
+    if first.kind == "line":
+        overlap, frac1, frac2 = _line_overlap(first, second, tolerance)
+        return overlap > tolerance.length * 0.5 or (
+            overlap > 1e-3 and max(frac1, frac2) > 0.05
+        )
     if math.dist(_center(first), _center(second)) > tolerance.position:
         return False
     first_length, second_length = entity_length(first), entity_length(second)
@@ -366,12 +434,6 @@ def _coincident(
     if first.radius is not None and second.radius is not None:
         if abs(first.radius - second.radius) > tolerance.radius:
             return False
-    if first.kind == "line" and len(first.points) == len(second.points) == 2:
-        direct = max(math.dist(a, b) for a, b in zip(first.points, second.points))
-        reverse = max(
-            math.dist(a, b) for a, b in zip(first.points, reversed(second.points))
-        )
-        return min(direct, reverse) <= tolerance.position
     return first.closed == second.closed
 
 
@@ -379,8 +441,24 @@ def _duplicate_measurement(
     entity: Entity,
     coincident: Entity,
     unit: str,
+    tolerance: ToleranceProfile | None = None,
 ) -> dict[str, Any]:
-    return duplicate_entity_evidence(entity, coincident, unit)
+    evidence = duplicate_entity_evidence(entity, coincident, unit)
+    if (
+        entity.kind == "line"
+        and coincident.kind == "line"
+        and tolerance is not None
+    ):
+        ov, f1, _ = _line_overlap(entity, coincident, tolerance)
+        L1 = entity_length(entity) or 0.0
+        evidence["overlap_length"] = round(ov, 4)
+        evidence["overlap_percentage"] = min(
+            100.0, max(0.0, round(f1 * 100.0, 1))
+        )
+        evidence["non_overlapping_remainder"] = round(
+            max(0.0, L1 - ov), 4
+        )
+    return evidence
 
 
 def analyze_comparison(
@@ -390,6 +468,8 @@ def analyze_comparison(
     missing: list[Entity],
     extra: list[Entity],
     tolerance: ToleranceProfile,
+    object_translations: dict[str, tuple[float, float]] | None = None,
+    ref_entity_to_obj: dict[str, str] | None = None,
 ) -> CausalAnalysis:
     analysis = CausalAnalysis()
     unit = reference.units
@@ -415,7 +495,8 @@ def analyze_comparison(
                 for candidate in sorted(
                     matched_students + prior_extras, key=lambda item: item.id
                 )
-                if _coincident(entity, candidate, tolerance)
+                if candidate.id != entity.id
+                and _coincident(entity, candidate, tolerance)
             ),
             None,
         )
@@ -437,7 +518,7 @@ def analyze_comparison(
                 )
             )
         else:
-            measurement = _duplicate_measurement(entity, coincident, unit)
+            measurement = _duplicate_measurement(entity, coincident, unit, tolerance)
             duplicate_evidence = analysis.observe(
                 "duplicate_overlap",
                 "unique geometry",
@@ -761,6 +842,8 @@ def analyze_comparison(
         student,
         matched,
         tolerance.position,
+        object_translations=object_translations,
+        ref_entity_to_obj=ref_entity_to_obj,
     )
     reference_by_id = {entity.id: entity for entity in reference.entities}
     student_by_id = {entity.id: entity for entity in student.entities}

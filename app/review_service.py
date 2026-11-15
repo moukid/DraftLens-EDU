@@ -72,6 +72,7 @@ def run_grading_pipeline(
     reference_rubrics: Mapping[str, str],
     rubric_references: Mapping[str, str],
     instructor_override: bool = False,
+    assessment_mode: str | None = None,
 ) -> GradingPipelineOutput:
     """Run the shared deterministic selection, parsing, validation, and grading path."""
 
@@ -83,10 +84,13 @@ def run_grading_pipeline(
             raise PipelineContractError(409, "The selected rubric does not exist or is not approved.")
         if rubric_references.get(selected_id) != reference_id:
             raise PipelineContractError(409, "The selected rubric is not associated with this reference drawing.")
+        if assessment_mode in {"formative", "summative"} and selected_rubric.assessment_mode != assessment_mode:
+            selected_rubric = selected_rubric.model_copy(update={"assessment_mode": assessment_mode})
         rubric_source = "explicit_approved" if rubric_id else "associated_approved"
     elif allow_fallback:
+        eff_mode = assessment_mode if assessment_mode in {"formative", "summative"} else "summative"
         selected_rubric = default_rubric("Explicit 65/25/10 fallback").model_copy(
-            update={"approved": True, "rubric_source": "explicit_fallback"}
+            update={"approved": True, "rubric_source": "explicit_fallback", "assessment_mode": eff_mode}
         )
         selected_rubric.tolerances = ToleranceProfile(
             position=position_tolerance,
@@ -144,13 +148,14 @@ def _withheld_comparison(
 ) -> dict[str, Any]:
     """Return non-authoritative evidence without exposing an issue flood or score."""
 
+    is_formative = getattr(rubric, "assessment_mode", "summative") == "formative"
     definitions = rubric_contract(rubric)["category_definitions"]
     category_subtotals = [
         {
             "id": category.id,
             "name": category.name,
-            "weight": category.weight,
-            "deduction": 0.0,
+            "weight": None if is_formative else category.weight,
+            "deduction": None if is_formative else 0.0,
             "score": None,
             "definition": definitions.get(category.id, ""),
             "deduction_evidence": [],
@@ -160,7 +165,7 @@ def _withheld_comparison(
     return {
         "score": None,
         "system_score": None,
-        "deduction": 0.0,
+        "deduction": None if is_formative else 0.0,
         "issues": [],
         "summary": {"issue_count": 0, "by_category": {}},
         "rubric_breakdown": category_subtotals,
@@ -177,11 +182,12 @@ def _withheld_comparison(
             "issues": [],
             "suppressed_findings": [],
             "category_subtotals": category_subtotals,
-            "total_applied_deduction": 0.0,
+            "total_applied_deduction": None if is_formative else 0.0,
             "final_score": None,
         },
         "tolerances": comparison["tolerances"],
         "rubric_application": comparison["rubric_application"],
+        "assessment_mode": rubric.assessment_mode,
     }
 
 
@@ -193,6 +199,7 @@ VISUAL_ROLE_CLASSES: dict[str, tuple[str, ...]] = {
     "connectivity": ("connectivity",),
     "warning": ("warning",),
     "critical": ("critical",),
+    "reference": ("reference-note",),
 }
 
 
@@ -323,12 +330,35 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         output.validation,
     )
     issues = _issue_payload(reviewed)
-    presentation = compact_finding_presentation(issues)
+    unsupported_payload = {
+        "reference": reviewed.reference_unsupported,
+        "student": reviewed.student_unsupported,
+    }
+    is_formative = getattr(output.rubric, "assessment_mode", "summative") == "formative"
+    presentation = compact_finding_presentation(
+        issues,
+        unsupported_entities=unsupported_payload,
+        is_formative=is_formative,
+    )
     finding_counts = _finding_counts(issues, reviewed)
     compatibility = output.compatibility.to_dict()
     scale_diagnostic = output.scale_diagnostic.to_dict()
+    rubric_dump = output.rubric.model_dump()
+    contract_dump = rubric_contract(output.rubric)
+    if is_formative:
+        rubric_dump["missing_part_deduction"] = None
+        for cat in rubric_dump.get("categories", []):
+            cat["weight"] = None
+            cat["max_deduction"] = None
+            for rule in cat.get("rules", []):
+                rule["deduction"] = None
+                rule["repeat_cap"] = None
+        contract_dump["missing_part_deduction"] = None
     response = {
-        "score": output.comparison["score"],
+        "score": None if is_formative else output.comparison.get("score"),
+        "system_score": None if is_formative else output.comparison.get("system_score"),
+        "deduction": None if is_formative else output.comparison.get("deduction"),
+        "missing_part_deduction": None if is_formative else getattr(output.rubric, "missing_part_deduction", None),
         "grading_status": (
             "withheld" if output.compatibility.grading_withheld else "graded"
         ),
@@ -338,8 +368,8 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         **scale_diagnostic,
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
-        "rubric": output.rubric.model_dump(),
-        **rubric_contract(output.rubric),
+        "rubric": rubric_dump,
+        **contract_dump,
         "suggested_assignment_type": output.analysis["suggested_assignment_type"],
         "assignment_type": output.rubric.assignment_type,
         "detected_features": output.analysis["detected_features"],
@@ -347,7 +377,22 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
         "normalization_mode": output.rubric.normalization_mode,
         "normalization_decision": normalization_decision(output),
         "units": reviewed.units,
+        "unit_notice": (
+            f"Reference declares {output.reference.units} ($INSUNITS={output.reference.units_code}) while student declares {output.student.units} ($INSUNITS={output.student.units_code}). Comparison performed using raw drawing coordinate basis per policy."
+            if output.reference.units_code != output.student.units_code
+            else None
+        ),
+        "units_info": {
+            "reference_units": output.reference.units,
+            "reference_units_code": output.reference.units_code,
+            "student_units": output.student.units,
+            "student_units_code": output.student.units_code,
+            "comparison_basis": "raw_drawing_coordinates",
+            "unit_mismatch": output.reference.units_code != output.student.units_code,
+        },
         "extents": list(reviewed.extents),
+        "student_extents": list(reviewed.student_extents),
+        "reference_extents": list(reviewed.reference_extents),
         "issues": issues,
         "finding_presentation": presentation,
         **{
@@ -359,6 +404,10 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
                 "geometry_points_after_evidence_limit",
                 "evidence_limit_reason",
                 "partial_completion_credit",
+                "assessment_objects",
+                "object_translations",
+                "matched_objects",
+                "assessment_mode",
             )
         },
         "finding_counts": finding_counts,
@@ -405,6 +454,30 @@ def build_review_artifacts(output: GradingPipelineOutput) -> ReviewArtifacts:
                 ),
             }
         )
+    if is_formative:
+        response["score"] = None
+        response["system_score"] = None
+        response["deduction"] = None
+        response["missing_part_deduction"] = None
+        if "score_breakdown" in response and isinstance(response["score_breakdown"], dict):
+            sb = response["score_breakdown"]
+            sb["final_score"] = None
+            sb["unrounded_final_score"] = None
+            sb["total_applied_deduction"] = None
+            sb["missing_part_deduction"] = None
+            for item in sb.get("category_subtotals", []):
+                item["weight"] = None
+                item["score"] = None
+                item["deduction"] = None
+            for item in sb.get("suppressed_findings", []):
+                item["raw_deduction"] = None
+                item["applied"] = None
+        for iss in response.get("issues", []):
+            iss["deduction"] = None
+            iss["applied_deduction"] = None
+            iss["raw_rule_deduction"] = None
+            iss["final_applied_contribution"] = None
+            iss["deduction_status"] = "diagnostic"
     return ReviewArtifacts(reviewed_drawing=reviewed, response=response)
 
 

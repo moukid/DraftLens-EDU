@@ -218,6 +218,113 @@ def correction_guidance(
             "Correct the ARC radius or angular geometry directly; if using SCALE, use the arc center as the base point.",
         )
     if issue.category == "missing_geometry":
+        if issue.code == "MISSING_OBJECT":
+            obj_id = issue.parent_object_id or (issue.measurement or {}).get("object_id") or "object"
+            total_parts = (issue.measurement or {}).get("total_part_count", 4)
+            obj_kind = (issue.measurement or {}).get("object_kind")
+            if not obj_kind and reference_entity:
+                obj_kind = reference_entity.entity_type.lower()
+
+            if obj_kind in {"circle", "circle_entity"}:
+                return CorrectionGuidance(
+                    "CIRCLE",
+                    ("COPY",),
+                    ("OSNAP", "CEN"),
+                    (
+                        f"Construct the complete required circle {obj_id} at the reference center and radius. "
+                        "Note: The entire circle object is absent."
+                    ),
+                )
+            if obj_kind in {"arc", "arc_entity"}:
+                return CorrectionGuidance(
+                    "ARC",
+                    ("CIRCLE", "TRIM"),
+                    ("OSNAP", "CEN"),
+                    (
+                        f"Construct the complete required arc {obj_id} at the reference coordinates. "
+                        "Note: The entire arc object is absent."
+                    ),
+                )
+            if obj_kind in {"segment", "line", "line_entity"} or total_parts == 1:
+                return CorrectionGuidance(
+                    "LINE",
+                    ("COPY",),
+                    (),
+                    (
+                        f"Draw the complete required line entity {obj_id} between the reference endpoints. "
+                        "Note: The entire element is absent."
+                    ),
+                )
+            if obj_kind == "rectangle":
+                return CorrectionGuidance(
+                    "RECTANG",
+                    ("PLINE", "LINE", "COPY"),
+                    ("OSNAP", "COORDS"),
+                    (
+                        f"Construct the complete required object {obj_id} (4 edges) at the reference coordinates. "
+                        "You may use RECTANG, closed PLINE, or connected LINE entities with exact vertex coordinates. "
+                        "Note: The entire object is absent, distinguishing this from a single missing edge."
+                    ),
+                )
+            return CorrectionGuidance(
+                "PLINE",
+                ("LINE", "COPY", "JOIN"),
+                ("OSNAP", "COORDS"),
+                (
+                    f"Construct the complete required object {obj_id} ({total_parts} parts) at the reference coordinates "
+                    "using PLINE or connected LINE/ARC entities. "
+                    "Note: The entire object is absent, distinguishing this from a single missing edge."
+                ),
+            )
+        if issue.code == "MISSING_PART":
+            comp_id = issue.component_id or (issue.measurement or {}).get("component_id") or "part"
+            obj_id = issue.parent_object_id or (issue.measurement or {}).get("object_id")
+            obj_ref = f" {obj_id}" if obj_id else ""
+            meas_kind = (issue.measurement or {}).get("kind")
+            ref_kind = reference_entity.kind if reference_entity else (meas_kind or "line")
+
+            if ref_kind == "circle":
+                return CorrectionGuidance(
+                    "CIRCLE",
+                    ("COPY",),
+                    ("OSNAP", "CEN"),
+                    (
+                        f"Add the missing circle part ({comp_id}) to complete partial object{obj_ref} at the reference center and radius. "
+                        "Note: This is a missing circular element on an otherwise partially present object."
+                    ),
+                )
+            if ref_kind == "arc":
+                return CorrectionGuidance(
+                    "ARC",
+                    ("CIRCLE", "TRIM"),
+                    ("OSNAP", "CEN", "END"),
+                    (
+                        f"Add the missing arc part ({comp_id}) to complete partial object{obj_ref} at the reference coordinates. "
+                        "Note: This is a missing arc segment on an otherwise partially present object."
+                    ),
+                )
+            if ref_kind == "text":
+                return CorrectionGuidance(
+                    "TEXT",
+                    ("MTEXT", "COPY"),
+                    (),
+                    (
+                        f"Add the missing text annotation ({comp_id}) to complete partial object{obj_ref} at the expected insertion point."
+                    ),
+                )
+
+            ent_type = reference_entity.entity_type if reference_entity else "LINE"
+            cmd = "LINE" if ent_type == "LINE" else ("PLINE" if ent_type in ("LWPOLYLINE", "POLYLINE") else ent_type)
+            return CorrectionGuidance(
+                cmd,
+                ("COPY", "EXTEND"),
+                ("OSNAP",),
+                (
+                    f"Add the missing edge ({comp_id}) to complete partial object{obj_ref}. "
+                    "Connect endpoints with adjacent vertices using OSNAP (ENDpoint). "
+                    "Note: This is a single missing edge on an otherwise partially present object."
+                ),
+            )
         return _missing_guidance(reference_entity)
     if issue.category == "extra_geometry":
         return CorrectionGuidance(

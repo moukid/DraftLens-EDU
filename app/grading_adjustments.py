@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import fsum
 from typing import Any
 
 from .compatibility import CompatibilityResult
@@ -54,31 +55,47 @@ def _apply_partial_completion_credit(
     ):
         return 0.0
     completion = _category(comparison, "completion")
-    if float(completion["score"]) > 0:
-        return 0.0
     missing_entries = [
         entry
         for entry in comparison["audit_trail"]
         if entry.get("finding_category") == "missing_geometry"
         and entry.get("score_category") == "completion"
     ]
-    reached_repeat_cap = any(
-        entry.get("deduction_status") == "capped"
-        and "rule_repeat_cap" in str(entry.get("cap_reason") or "")
-        for entry in missing_entries
+    # Apply demonstrated-work completion credit monotonically at every deduction
+    # level so deleting additional geometry never rebates a previously applied
+    # deduction or increases the score.
+    category = next(c for c in rubric.categories if c.id == "completion")
+    missing_rule = next(
+        (r for r in category.rules if r.check == "missing_geometry" and r.enabled),
+        None,
     )
-    if not reached_repeat_cap:
+    if missing_rule is None or missing_rule.deduction <= 0 or not missing_entries:
+        return 0.0
+    weight = float(completion["weight"])
+    unit_credit = min(weight, float(missing_rule.deduction))
+    maximum_credit = max(unit_credit, weight - unit_credit)
+    credit = min(
+        maximum_credit,
+        max(
+            unit_credit,
+            round(weight * compatibility.reference_match_coverage, 2),
+        ),
+    )
+    target_deduction = round(max(0.0, weight - credit), 2)
+    if target_deduction >= float(completion["deduction"]):
         return 0.0
 
-    weight = float(completion["weight"])
-    credit = float(
+    reduction = round(
         min(
-            20,
-            max(5, round(weight * compatibility.reference_match_coverage)),
-        )
+            max(0.0, float(completion["deduction"]) - target_deduction),
+            fsum(
+                float(entry.get("final_applied_contribution") or 0.0)
+                for entry in missing_entries
+            ),
+        ),
+        2,
     )
-    target_deduction = max(0.0, weight - credit)
-    reduction = max(0.0, float(completion["deduction"]) - target_deduction)
+    target_deduction = round(float(completion["deduction"]) - reduction, 2)
     remaining = reduction
     for entry in reversed(missing_entries):
         current = float(entry.get("final_applied_contribution") or 0.0)
@@ -95,7 +112,7 @@ def _apply_partial_completion_credit(
 
     completion["deduction"] = round(target_deduction, 2)
     completion["score"] = round(weight - target_deduction, 2)
-    return credit
+    return reduction
 
 
 def apply_acceptance_scoring(
@@ -106,6 +123,8 @@ def apply_acceptance_scoring(
     """Apply evidence sufficiency and demonstrated-work credit transparently."""
 
     if comparison.get("score") is None:
+        return
+    if rubric.completion_scoring_mode in {"object_part_deduction", "proportional"}:
         return
     coverage = float(compatibility.reference_match_coverage)
     status_allows_evidence = compatibility.compatibility_status in {
@@ -152,15 +171,20 @@ def apply_acceptance_scoring(
         }
         comparison["audit_trail"].append(policy_entry)
         geometry["deduction_evidence"].append(policy_entry)
-        geometry["deduction"] = round(float(geometry["deduction"]) + evidence_deduction, 2)
+        geometry["deduction"] = round(
+            float(geometry["deduction"]) + evidence_deduction, 2
+        )
         geometry["score"] = after
 
     partial_credit = _apply_partial_completion_credit(
         comparison, rubric, compatibility
     )
     subtotals = comparison["score_breakdown"]["category_subtotals"]
-    total_deduction = round(sum(float(item["deduction"]) for item in subtotals), 2)
-    final_score = max(0.0, round(100.0 - total_deduction, 1))
+    total_deduction = round(
+        sum(float(item["deduction"]) for item in subtotals), 2
+    )
+    score_precision = 2 if rubric.rubric_version == "2.0" else 1
+    final_score = max(0.0, round(100.0 - total_deduction, score_precision))
     comparison["score"] = final_score
     comparison["system_score"] = final_score
     comparison["deduction"] = total_deduction
@@ -172,6 +196,7 @@ def apply_acceptance_scoring(
         {
             "total_applied_deduction": total_deduction,
             "final_score": final_score,
+            "unrounded_final_score": max(0.0, 100.0 - total_deduction),
             "geometry_evidence_factor": round(factor, 6),
             "geometry_evidence_coverage": round(coverage, 6),
             "geometry_points_before_evidence_limit": round(before, 2),

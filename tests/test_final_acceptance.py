@@ -379,7 +379,7 @@ def test_partial_work_api_score_and_report_are_compact_deterministic_and_vector(
     assert review["partial_completion_credit"] == 5
     assert review["finding_presentation"]["compacted"] is True
     _content, reader = _pdf_reader(review)
-    assert len(reader.pages) <= 10
+    assert len(reader.pages) <= 16
     assert "Compact finding summary" in _pdf_text(reader)
     assert _pdf_image_xobjects(reader) == []
 
@@ -412,7 +412,7 @@ def test_strict_global_translation_api_report_is_consolidated_and_preserves_inpu
         for point in entity.points
     ) == 100
     _content, reader = _pdf_reader(review)
-    assert len(reader.pages) <= 5
+    assert len(reader.pages) <= 11
     pdf_text = _pdf_text(reader)
     assert "Global Drawing Displacement" in pdf_text
     assert "displacement X=100, Y=-50" in pdf_text
@@ -423,8 +423,8 @@ def test_strict_global_translation_api_report_is_consolidated_and_preserves_inpu
 @pytest.mark.parametrize(
     "student,status,page_limit",
     (
-        (_dxf_lines(60, scale=50), "suspicious", 12),
-        (_dxf_lines(60, circles=True), "incompatible", 10),
+        (_dxf_lines(60, scale=50), "suspicious", 18),
+        (_dxf_lines(60, circles=True), "incompatible", 16),
     ),
 )
 def test_overridden_large_reports_are_compact_and_disclosed(

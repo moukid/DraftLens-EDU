@@ -65,6 +65,8 @@ class Issue:
     code: str | None = None
     reference_entity_id: str | None = None
     student_entity_id: str | None = None
+    parent_object_id: str | None = None
+    component_id: str | None = None
     location: tuple[float, float] | None = None
     measurement: dict[str, Any] | None = None
     rubric_rule_id: str | None = None
@@ -80,6 +82,9 @@ class Issue:
     suppression_reason: str | None = None
     status: Literal["accepted", "rejected"] = "accepted"
     score_category: str | None = None
+    score_categories: list[str] | None = None
+    category_split: dict[str, float] | None = None
+    badge_label: str | None = None
     raw_rule_deduction: float = 0.0
     deduction_after_rule_cap: float = 0.0
     deduction_after_category_cap: float = 0.0

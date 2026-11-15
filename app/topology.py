@@ -587,6 +587,7 @@ def _endpoint_correspondence(
     reference: TopologyGraph,
     student: TopologyGraph,
     matched: list[tuple[Entity, Entity, float]],
+    ref_translations: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[dict[str, TopologyEndpoint], dict[str, str]]:
     reference_by_entity: dict[str, list[TopologyEndpoint]] = {}
     student_by_entity: dict[str, list[TopologyEndpoint]] = {}
@@ -608,19 +609,20 @@ def _endpoint_correspondence(
         )
         if len(reference_endpoints) != len(student_endpoints):
             continue
+        dx, dy = (
+            ref_translations.get(reference_entity.id, (0.0, 0.0))
+            if ref_translations
+            else (0.0, 0.0)
+        )
         if len(reference_endpoints) == 2:
             direct = sum(
-                math.dist(reference_endpoint.point, student_endpoint.point)
-                for reference_endpoint, student_endpoint in zip(
-                    reference_endpoints, student_endpoints
-                )
+                math.dist((r_ep.point[0] + dx, r_ep.point[1] + dy), s_ep.point)
+                for r_ep, s_ep in zip(reference_endpoints, student_endpoints)
             )
             reversed_students = list(reversed(student_endpoints))
             reverse = sum(
-                math.dist(reference_endpoint.point, student_endpoint.point)
-                for reference_endpoint, student_endpoint in zip(
-                    reference_endpoints, reversed_students
-                )
+                math.dist((r_ep.point[0] + dx, r_ep.point[1] + dy), s_ep.point)
+                for r_ep, s_ep in zip(reference_endpoints, reversed_students)
             )
             if reverse < direct:
                 student_endpoints = reversed_students
@@ -632,7 +634,7 @@ def _endpoint_correspondence(
 
 
 def _gap_region(expected: Point, actual: tuple[Point, ...]) -> tuple[float, float, float, float]:
-    points = (expected, *actual)
+    points = actual if actual else (expected,)
     return (
         min(point[0] for point in points),
         min(point[1] for point in points),
@@ -646,12 +648,22 @@ def compare_topology(
     student_drawing: Drawing,
     matched: list[tuple[Entity, Entity, float]],
     tolerance: float,
+    object_translations: dict[str, tuple[float, float]] | None = None,
+    ref_entity_to_obj: dict[str, str] | None = None,
 ) -> TopologyComparison:
     """Compare only junctions required by the reference topology."""
 
+    ref_translations: dict[str, tuple[float, float]] = {}
+    if object_translations and ref_entity_to_obj:
+        for eid, obj_id in ref_entity_to_obj.items():
+            if obj_id in object_translations:
+                ref_translations[eid] = object_translations[obj_id]
+
     reference = build_topology(reference_drawing, tolerance)
     student = build_topology(student_drawing, tolerance)
-    endpoint_map, entity_map = _endpoint_correspondence(reference, student, matched)
+    endpoint_map, entity_map = _endpoint_correspondence(
+        reference, student, matched, ref_translations
+    )
     reference_endpoint_by_id = {item.id: item for item in reference.endpoints}
     student_entity_by_id = {item.id: item for item in student_drawing.entities}
     student_component_by_entity = {
@@ -663,6 +675,16 @@ def compare_topology(
     gaps: list[EndpointGap] = []
 
     for connection in reference.connections:
+        conn_dx, conn_dy = (0.0, 0.0)
+        if connection.entity_ids and ref_translations:
+            conn_dx, conn_dy = ref_translations.get(
+                connection.entity_ids[0], (0.0, 0.0)
+            )
+        expected_conn_point = (
+            round(connection.point[0] + conn_dx, 6),
+            round(connection.point[1] + conn_dy, 6),
+        )
+
         actual_endpoints = [endpoint_map.get(item) for item in connection.endpoint_ids]
         actual_points: tuple[Point, ...] = ()
         distance: float | None = None
@@ -704,7 +726,7 @@ def compare_topology(
                 connection.id,
                 connection.kind,
                 status,
-                connection.point,
+                expected_conn_point,
                 actual_points,
                 distance,
                 connection.entity_ids,
@@ -716,7 +738,7 @@ def compare_topology(
             continue
         candidate_pairs = [
             (
-                math.dist(endpoint_map[endpoint_id].point, connection.point),
+                math.dist(endpoint_map[endpoint_id].point, expected_conn_point),
                 endpoint_id,
                 endpoint_map[endpoint_id],
             )
@@ -735,9 +757,9 @@ def compare_topology(
                 junction_id,
                 connection.id,
                 distance,
-                connection.point,
+                expected_conn_point,
                 actual_points,
-                _gap_region(connection.point, actual_points),
+                _gap_region(expected_conn_point, actual_points),
                 connection.entity_ids,
                 student_entity_ids,
                 primary_reference_id,

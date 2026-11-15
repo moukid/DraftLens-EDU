@@ -43,6 +43,38 @@ def _plan_bytes(scale: float = 1.0, count: int = 4) -> bytes:
     return stream.getvalue().encode("utf-8")
 
 
+def _plan_reordered_bytes(scale: float = 1.0, count: int = 4) -> bytes:
+    lines = []
+    rectangle = (
+        ((0, 0), (10, 0)),
+        ((10, 0), (10, 6)),
+        ((10, 6), (0, 6)),
+        ((0, 6), (0, 0)),
+    )
+    for start, end in rectangle:
+        lines.append(
+            (
+                (start[0] * scale, start[1] * scale),
+                (end[0] * scale, end[1] * scale),
+            )
+        )
+    for index in range(4, count):
+        lines.append(
+            (
+                (index * 2 * scale, 10 * scale),
+                ((index * 2 + 1 + index / 10) * scale, 10 * scale),
+            )
+        )
+    document = ezdxf.new("R2010")
+    document.units = ezdxf.units.MM
+    modelspace = document.modelspace()
+    for start, end in reversed(lines):
+        modelspace.add_line(start, end)
+    stream = io.StringIO()
+    document.write(stream)
+    return stream.getvalue().encode("utf-8")
+
+
 def _approve(reference: bytes) -> dict:
     suggestion = client.post(
         "/api/rubric/suggest",
@@ -73,6 +105,7 @@ def test_scaled_copy_is_withheld_then_override_is_authoritative_and_reported():
     _approve(reference)
 
     withheld = client.post("/api/review", files=_files(reference, student)).json()
+
     assert withheld["compatibility_status"] == "suspicious"
     assert withheld["grading_status"] == "withheld"
     assert withheld["score"] is None
@@ -118,6 +151,7 @@ def test_unrelated_t_crossing_is_withheld_without_issue_flood():
     _approve(reference)
 
     withheld = client.post("/api/review", files=_files(reference, student)).json()
+
     assert withheld["compatibility_status"] == "incompatible"
     assert withheld["score"] is None
     assert not [issue for issue in withheld["issues"] if issue["provenance"] == "comparison"]
@@ -138,12 +172,14 @@ def test_unrelated_line_heavy_submission_is_withheld_until_explicit_override():
     _approve(reference)
 
     grade = client.post("/api/grade", files=_files(reference, student)).json()
+
     assert grade["compatibility_status"] == "incompatible"
     assert grade["grading_status"] == "withheld"
     assert grade["score"] is None
     assert grade["issues"] == []
 
     withheld = client.post("/api/review", files=_files(reference, student)).json()
+
     assert withheld["compatibility_status"] == "incompatible"
     assert withheld["grading_status"] == "withheld"
     assert withheld["score"] is None
@@ -194,7 +230,45 @@ def test_unrelated_line_heavy_submission_is_withheld_until_explicit_override():
     assert exact["compatibility_status"] == "compatible"
     assert exact["instructor_override"] is False
     assert "compatibility_override" not in exact
+    assert exact["grading_status"] == "graded"
+    assert exact["score"] == 100.0
+    assert exact["report_available"] is True
+    assert not [i for i in exact.get("issues", []) if i.get("classification") == "primary"]
 
+
+
+def test_exact_equivalent_reordered_geometry_is_compatible_before_and_after_override():
+    for count in (20, 108):
+        reference = _plan_bytes(count=count)
+        reordered = _plan_reordered_bytes(count=count)
+        _approve(reference)
+
+        # 1. Fresh review of reordered equivalent geometry with reversed entity sequence
+        fresh = client.post("/api/review", files=_files(reference, reordered)).json()
+        assert fresh["compatibility_status"] == "compatible"
+        assert fresh["grading_status"] == "graded"
+        assert fresh["score"] == 100.0
+        assert fresh["instructor_override"] is False
+        assert "compatibility_override" not in fresh
+        assert fresh["report_available"] is True
+        assert not [i for i in fresh.get("issues", []) if i.get("classification") == "primary"]
+
+        # 2. Unrelated withholding and override cycle
+        unrelated = (AUDIT / "03_wrong_length_73C_80_units.dxf").read_bytes()
+        overridden = client.post(
+            "/api/review",
+            data={"grade_anyway": "true"},
+            files=_files(reference, unrelated),
+        ).json()
+        assert overridden["instructor_override"] is True
+
+        # 3. Post-override review of reordered equivalent geometry does not inherit override state
+        post_override = client.post("/api/review", files=_files(reference, reordered)).json()
+        assert post_override["compatibility_status"] == "compatible"
+        assert post_override["grading_status"] == "graded"
+        assert post_override["score"] == 100.0
+        assert post_override["instructor_override"] is False
+        assert "compatibility_override" not in post_override
 
 
 def test_empty_student_is_not_graded():

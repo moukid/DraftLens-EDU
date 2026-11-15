@@ -1,8 +1,8 @@
 from __future__ import annotations
-import html,os,uuid
+import html, math, os, uuid
 from dataclasses import dataclass
 from pathlib import Path
-from fastapi import FastAPI,File,Form,HTTPException,UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment,FileSystemLoader,select_autoescape
@@ -14,7 +14,7 @@ from .pdf_report import content_disposition, generate_pdf
 from .review_service import GradingPipelineOutput, PipelineContractError, build_review_artifacts, compatibility_message, normalization_decision, reference_fingerprint, run_grading_pipeline
 from .review_snapshot import (
     ReviewSnapshotStore, SnapshotCapacityError, SnapshotExpired, SnapshotNotFound,
-    StudentMetadataError, normalize_student_metadata,
+    StudentMetadataError, normalize_student_metadata, parse_student_dxf_filename,
 )
 from .rubric import (
     BASELINE_RUBRIC_TEMPLATE, Rubric, default_rubric, rubric_contract,
@@ -67,9 +67,19 @@ async def run_uploaded_pipeline(
     radius_tolerance: float,
     rubric: UploadFile | None,
     instructor_override: bool = False,
+    assessment_mode: str | None = None,
 ):
     reference_bytes = await read_upload(reference)
     student_bytes = await read_upload(student)
+    for tol_name, tol_val in (
+        ("Position tolerance", position_tolerance),
+        ("Length tolerance", length_tolerance),
+        ("Angle tolerance", angle_tolerance),
+        ("Dimension tolerance", dimension_tolerance),
+        ("Radius tolerance", radius_tolerance),
+    ):
+        if not math.isfinite(tol_val) or tol_val < 0:
+            raise HTTPException(422, f"{tol_name} must be a non-negative finite number.")
     if rubric and rubric.filename:
         raise HTTPException(409, "Inline rubric uploads are no longer accepted. Approve and associate the rubric before grading.")
     try:
@@ -87,6 +97,7 @@ async def run_uploaded_pipeline(
             reference_rubrics=REFERENCE_RUBRICS,
             rubric_references=RUBRIC_REFERENCES,
             instructor_override=instructor_override,
+            assessment_mode=assessment_mode,
         )
         return UploadedPipelineResult(
             output=output,
@@ -124,12 +135,53 @@ async def grade(
         feedback = generate_feedback(result)
     except Exception:
         feedback = None
+    is_formative = getattr(output.rubric, "assessment_mode", "summative") == "formative"
+    rubric_dump = output.rubric.model_dump()
+    if is_formative:
+        result["score"] = None
+        result["system_score"] = None
+        result["deduction"] = None
+        result["missing_part_deduction"] = None
+        rubric_dump["missing_part_deduction"] = None
+        for cat in rubric_dump.get("categories", []):
+            cat["weight"] = None
+            cat["max_deduction"] = None
+            for rule in cat.get("rules", []):
+                rule["deduction"] = None
+                rule["repeat_cap"] = None
+        if "score_breakdown" in result and isinstance(result["score_breakdown"], dict):
+            sb = result["score_breakdown"]
+            sb["final_score"] = None
+            sb["unrounded_final_score"] = None
+            sb["total_applied_deduction"] = None
+            sb["missing_part_deduction"] = None
+            for item in sb.get("category_subtotals", []):
+                item["weight"] = None
+                item["score"] = None
+                item["deduction"] = None
+            for item in sb.get("suppressed_findings", []):
+                item["raw_deduction"] = None
+                item["applied"] = None
+        if "rubric_breakdown" in result and isinstance(result["rubric_breakdown"], list):
+            for cat in result["rubric_breakdown"]:
+                cat["weight"] = None
+                cat["deduction"] = None
+                for ev in cat.get("deduction_evidence", []):
+                    ev["applied"] = None
+                    ev["raw_deduction"] = None
+                    ev["deduction_status"] = "diagnostic"
+        for iss in result.get("issues", []):
+            iss["deduction"] = None
+            iss["applied_deduction"] = None
+            iss["raw_rule_deduction"] = None
+            iss["final_applied_contribution"] = None
+            iss["deduction_status"] = "diagnostic"
     result.update({
         "reference": output.reference.to_dict(), "student": output.student.to_dict(),
         "feedback": feedback or local_feedback(result), "ai_used": feedback is not None,
         "reference_id": output.reference_id,
         "rubric_selection": output.rubric_selection,
-        "rubric": output.rubric.model_dump(),
+        "rubric": rubric_dump,
         "suggested_assignment_type": output.analysis["suggested_assignment_type"],
         "assignment_type": output.rubric.assignment_type,
         "detected_features": output.analysis["detected_features"],
@@ -172,14 +224,34 @@ async def review(
     student_name: str | None = Form(None),
     student_id: str | None = Form(None),
     course_section: str | None = Form(None),
+    group_code: str | None = Form(None),
+    assignment_code: str | None = Form(None),
+    assessment_mode: str | None = Form(None),
     grade_anyway: bool = Form(False),
 ):
     uploaded = await run_uploaded_pipeline(
         reference, student, rubric_id, allow_fallback, position_tolerance,
         length_tolerance, angle_tolerance, dimension_tolerance, radius_tolerance, rubric, grade_anyway,
+        assessment_mode=assessment_mode,
     )
+    parsed_meta = parse_student_dxf_filename(uploaded.student_filename)
+    eff_name = student_name if (student_name and student_name.strip()) else parsed_meta.get("student_name")
+    eff_id = student_id if (student_id and student_id.strip()) else parsed_meta.get("student_id")
+    eff_section = course_section if (course_section and course_section.strip()) else parsed_meta.get("course_section")
+    eff_group = group_code if (group_code and group_code.strip()) else parsed_meta.get("group_code")
+    eff_code = assignment_code if (assignment_code and assignment_code.strip()) else parsed_meta.get("assignment_code")
+    eff_num = parsed_meta.get("assignment_number") if not (assignment_code and assignment_code.strip()) else None
+    eff_label = parsed_meta.get("assignment_type_label") if not (assignment_code and assignment_code.strip()) else None
     try:
-        metadata = normalize_student_metadata(student_name, student_id, course_section)
+        metadata = normalize_student_metadata(
+            eff_name,
+            eff_id,
+            eff_section,
+            group_code=eff_group,
+            assignment_code=eff_code,
+            assignment_number=eff_num,
+            assignment_type_label=eff_label,
+        )
     except StudentMetadataError as exc:
         raise HTTPException(422, str(exc)) from exc
     artifacts = build_review_artifacts(uploaded.output)
@@ -206,19 +278,27 @@ async def review(
     return snapshot.review_response
 
 @app.get("/api/reviews/{review_id}/report.pdf")
-def download_pdf_report(review_id: str):
+def download_pdf_report(
+    review_id: str,
+    include_appendix: bool = Query(False),
+):
     try:
         snapshot = REVIEW_SNAPSHOTS.get(review_id)
     except SnapshotExpired as exc:
         raise HTTPException(410, "The review report has expired. Generate a new review.") from exc
     except SnapshotNotFound as exc:
         raise HTTPException(404, "The review report was not found.") from exc
-    pdf = generate_pdf(snapshot)
+    pdf = generate_pdf(snapshot, include_appendix=include_appendix)
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": content_disposition(snapshot)},
+        headers={"Content-Disposition": content_disposition(snapshot), "Cache-Control": "no-store"},
     )
+@app.get("/api/student/parse-filename")
+def parse_student_filename(filename: str = Query(...)):
+    return parse_student_dxf_filename(filename)
+
+
 @app.post("/api/reference/validate")
 async def reference_validate(reference: UploadFile = File(...)):
     drawing = parse_dxf_bytes(await read_upload(reference), source="reference")

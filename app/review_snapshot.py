@@ -79,25 +79,108 @@ class StudentMetadata:
     student_name: str | None = None
     student_id: str | None = None
     course_section: str | None = None
+    group_code: str | None = None
+    assignment_code: str | None = None
+    assignment_number: int | None = None
+    assignment_type_label: str | None = None
 
-    def to_dict(self) -> dict[str, str | None]:
-        return {
+    def to_dict(self) -> dict[str, Any]:
+        base: dict[str, Any] = {
             "student_name": self.student_name,
             "student_id": self.student_id,
             "course_section": self.course_section,
         }
+        if (
+            self.group_code is not None
+            or self.assignment_code is not None
+            or self.assignment_number is not None
+            or self.assignment_type_label is not None
+        ):
+            base["group_code"] = self.group_code
+            base["assignment_code"] = self.assignment_code
+            base["assignment_number"] = self.assignment_number
+            base["assignment_type_label"] = self.assignment_type_label
+        return base
 
 
 def normalize_student_metadata(
     student_name: str | None = None,
     student_id: str | None = None,
     course_section: str | None = None,
+    group_code: str | None = None,
+    assignment_code: str | None = None,
+    assignment_number: int | None = None,
+    assignment_type_label: str | None = None,
 ) -> StudentMetadata:
+    import re
+    norm_code = _normalize_field(assignment_code, "Assignment code", 32)
+    eff_num = assignment_number
+    eff_label = _normalize_field(assignment_type_label, "Assignment type label", 64)
+    if norm_code:
+        cm = re.match(r"^([0-9]+)([A-Za-z]?)$", norm_code)
+        if cm:
+            if eff_num is None:
+                eff_num = int(cm.group(1))
+            if not eff_label:
+                suffix = (cm.group(2) or "").upper()
+                type_labels = {
+                    "L": "Laboratory assignment",
+                    "T": "Tutorial assignment",
+                    "H": "Homework assignment",
+                }
+                eff_label = type_labels.get(suffix, "Assignment")
     return StudentMetadata(
         student_name=_normalize_field(student_name, "Student name", 120),
         student_id=_normalize_field(student_id, "Student ID", 64),
         course_section=_normalize_field(course_section, "Course / section", 120),
+        group_code=_normalize_field(group_code, "Group", 32),
+        assignment_code=norm_code,
+        assignment_number=eff_num,
+        assignment_type_label=eff_label,
     )
+
+
+def parse_student_dxf_filename(filename: str | None) -> dict[str, Any]:
+    """Parse student DXF filename: <Group>_<StudentID>_<StudentName>_<AssignmentNumber><AssignmentType>.dxf"""
+    if not filename:
+        return {}
+    import re
+    stem = unicodedata.normalize("NFC", str(filename)).strip()
+    if stem.lower().endswith(".dxf"):
+        stem = stem[:-4]
+    stem = re.sub(r"\s*\(\d+\)$", "", stem).strip()
+    if "copy" in stem.lower():
+        stem = re.sub(r"[\s_-]*(?:copy|\d+)$", "", stem, flags=re.IGNORECASE).strip()
+
+    match = re.match(r"^([A-Za-z0-9-]+)_([0-9A-Za-z-]+)_(.+?)_([0-9]+[A-Za-z]?)$", stem)
+    if not match:
+        return {}
+
+    group, student_id, raw_name, code = match.groups()
+    name_parts = [p for p in re.split(r"[\s_]+", raw_name.strip()) if p]
+    display_name = " ".join(part.capitalize() for part in name_parts)
+    identifier = "".join(part.capitalize() for part in name_parts)
+
+    code_match = re.match(r"^([0-9]+)([A-Za-z]?)$", code)
+    assign_num = int(code_match.group(1)) if code_match else None
+    assign_suffix = code_match.group(2).upper() if code_match and code_match.group(2) else ""
+    type_labels = {
+        "L": "Laboratory assignment",
+        "T": "Tutorial assignment",
+        "H": "Homework assignment",
+    }
+    assign_type_label = type_labels.get(assign_suffix, "Assignment")
+
+    return {
+        "group_code": group.strip(),
+        "course_section": None,
+        "student_id": student_id.strip(),
+        "student_name": display_name,
+        "student_identifier": identifier,
+        "assignment_number": assign_num,
+        "assignment_code": code,
+        "assignment_type_label": assign_type_label,
+    }
 
 
 @dataclass(frozen=True, slots=True)
